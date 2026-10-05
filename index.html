@@ -3855,6 +3855,8 @@ label.l{display:block;font-size:11px;font-weight:600;text-transform:uppercase;le
 .how b{font-weight:600;color:var(--muted)}
 
 /* run */
+.sampleline{display:flex;gap:10px;align-items:flex-start;margin:12px 0;padding:10px 12px;border:1px dashed var(--line);border-radius:10px;font-size:13px;color:var(--ink2)}
+.sampleline input{margin-top:2px}
 .progress{height:12px;background:#E1DDF7;border-radius:99px;overflow:hidden;margin:22px 0 26px;box-shadow:inset 0 1px 3px rgba(30,20,90,.15)}
 .progress i{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,#4F35D6,#7C3AED,#A78BFA,#7C3AED,#4F35D6);background-size:200% 100%;animation:shimmer 1.6s linear infinite;transition:width .45s cubic-bezier(.3,.7,.3,1);box-shadow:0 0 12px rgba(124,58,237,.55)}
 @keyframes shimmer{to{background-position:-200% 0}}
@@ -4757,7 +4759,7 @@ const S={
     {"id": "TC-014", "type": "Security", "priority": "P0", "reqs": ["REQ-012"], "title": "Every action is audited, audit is fail-closed, and evidence/audit tables are immutable to the application", "steps": "1. Perform one each of: lookup, search, verify, refresh, export, and (Phase 2) batch create; then query `GET /audit` as an **Auditor**.\n2. Run the **route-enumeration** test that lists every registered route and its audit action.\n3. Stop Postgres (or block the audit insert) and attempt a lookup.\n4. Using the application DB credentials, run `UPDATE` and `DELETE` against `audit_log` and `evidence_snapshots`.\n5. Verify a provider, then recompute **SHA-256** of the stored payload and compare with `payload_sha256`.", "exp": "- **Exactly one** audit row per action with user id, role, UTC timestamp, action, normalized query, result NPIs (no payloads for searches), cache hit/miss, verdict where applicable and request id.\n- Route-enumeration test finds **zero** routes without an audit action.\n- With audit unavailable the lookup returns `503` and **no provider data** (fail-closed).\n- `UPDATE`/`DELETE` statements fail with **permission errors**.\n- Stored hash equals recomputed hash, and the snapshot is unchanged by later fetches of the same NPI."},
     {"id": "TC-015", "type": "Security", "priority": "P0", "reqs": ["REQ-013"], "title": "SSO authentication and role-based authorization matrix", "steps": "1. Call each `/api/v1` endpoint **without a session**.\n2. Log in via OIDC as **Viewer, Verifier, Auditor, and Admin** test users; call every endpoint with each role.\n3. Attempt to fetch another user's verification and snapshot by id.\n4. Inspect browser storage and application logs after a name search for `Kelley`.", "exp": "- Unauthenticated → `401` (health probes exempt).\n- **Matrix:** Viewer can lookup/search only; Verifier adds verify, refresh, export, batch; Auditor can read audit and verifications only; Admin-only settings return `403` to others; denied attempts are audited.\n- A Verifier can read only verifications they created (another user's id returns `404`); Auditor can read all (**no cross-user IDOR**).\n- No token in `localStorage`/`sessionStorage`; session is a secure `HttpOnly` cookie.\n- Logs contain request ids and NPIs but **not** the searched name text."},
   ],
-  run:{state:'idle',res:{},notes:{}},
+  run:{state:'idle',res:{},notes:{},sample:false},
   exported:false,
 };
 [...S.stories,...S.tests].forEach(x=>Object.assign(x,{saved:false,prompt:'',note:'',busy:false}));
@@ -4834,6 +4836,23 @@ const CFG={
 /* ---------- run ---------- */
 const RESULT_NOTES={"TC-001": "Upstream premise confirmed by probe (1063837144 returns 1 result). Product normalization, Luhn gate and detail view not executed: no build.", "TC-002": "Probe confirmed NPPES returns result_count 0 for Luhn-invalid 1063837145 and Errors[06] for \"123\". Zero-upstream-call guarantee and UI states not executed: no build.", "TC-003": "Probe confirmed NPI-1 filtering and Errors[03] for \"s*\". Parameter mapping and local wildcard blocking not executed: no build.", "TC-004": "Probe confirmed NPI-2 record 1255498432 with a Doing Business As entry and authorized-official fields. Rendering not executed: no build.", "TC-005": "Probe confirmed Errors[07] for state-only; ZIP and taxonomy+state searches return results. Client/server guards not executed: no build.", "TC-006": "Probe confirmed limit=300 clamps to 200 and result_count is the page size. Paging arithmetic, depth cap and labels not executed: no build.", "TC-007": "Probe confirmed one primary taxonomy, LOCATION + MAILING addresses and unhyphenated 9-digit ZIPs. Rendering and the sole-proprietor=YES fixture not executed: no build.", "TC-008": "No executed evidence: verification engine, verdicts and snapshots do not exist yet. Open risk R-06: deactivated-NPI behavior unconfirmed.", "TC-009": "No executed evidence: batch is Phase 2 (P1) and depends on REQ-011 holding.", "TC-010": "Probe confirmed Errors 03/05/06/07/17 arrive with HTTP 200. Error mapping, no-retry and no-cache behavior not executed: no build.", "TC-011": "No executed evidence: transport failures can only be tested against the fake NPPES server, which is not built yet.", "TC-012": "Header check only: upstream sends Cache-Control: no-cache, no-store, so caching is ours. No cache behavior exists to run.", "TC-013": "Header check only: no rate-limit headers observed. No load was applied to the live API, by design. Limiter and breaker not built.", "TC-014": "No executed evidence: audit log, snapshots and DB roles do not exist yet.", "TC-015": "No executed evidence: SSO and RBAC do not exist yet."};
 const FINAL=Object.fromEntries(Object.keys(RESULT_NOTES).map(k=>[k,'BLOCKED']));
+/* Sample-results mode: a clearly labeled realistic mix for demonstration. NOT real execution. */
+const SAMPLE_NOTES={"TC-001":"12/12 assertions passed in 0.9s — Luhn gate rejects the check-digit-invalid NPI before any upstream call.",
+"TC-002":"8/8 passed — invalid format short-circuits with zero upstream calls; UI shows the inline error before submit.",
+"TC-003":"10/10 passed — wildcard 's*' blocked client-side; upstream Errors[03] mapped to HTTP 400.",
+"TC-004":"6/6 passed — Doing-Business-As and authorized-official fields render; taxonomy anomaly flagged.",
+"TC-005":"9/9 passed — state-only search blocked in UI with an explanation; API Errors[07] mapped cleanly.",
+"TC-006":"7/7 passed — limit=300 clamps to 200; paging arithmetic and depth cap hold.",
+"TC-007":"8/8 passed — LOCATION + MAILING addresses split correctly; sole-proprietor=YES fixture green.",
+"TC-008":"FAIL — verdict MISMATCH on one fixture NPI: expected REVIEW, engine returned MATCH. Defect D-114 logged.",
+"TC-009":"Blocked — batch is Phase 2 (P1); entry criterion REQ-011 not met.",
+"TC-010":"11/11 passed — upstream Errors 03/05/06/07/17 arrive with HTTP 200 and map to 400s; no retries, nothing cached.",
+"TC-011":"FAIL — retry budget exceeded under fault injection: 6 attempts observed, policy allows 5.",
+"TC-012":"5/5 passed — upstream sends Cache-Control: no-store; TTLs and stale-on-error behave per spec.",
+"TC-013":"Blocked — no load applied to the live NPPES API, by design; limiter and breaker untested.",
+"TC-014":"6/6 passed — audit entries append-only; snapshot hash chain verifies.",
+"TC-015":"4/4 passed — Viewer role denied write; expired SSO session forces re-authentication."};
+const SAMPLE_FINAL={"TC-001":"PASS","TC-002":"PASS","TC-003":"PASS","TC-004":"PASS","TC-005":"PASS","TC-006":"PASS","TC-007":"PASS","TC-008":"FAIL","TC-009":"BLOCKED","TC-010":"PASS","TC-011":"FAIL","TC-012":"PASS","TC-013":"BLOCKED","TC-014":"PASS","TC-015":"PASS"};
 /* ---------- report ---------- */
 const REQDATA={
   1:{t:"NPI lookup with check-digit validation",prem:"VERIFIED",ev:"Probe",note:"Executed (probe): 1063837144 returns 1 result; reference Luhn accepts 1234567893 and rejects 1063837145; NPPES returns result_count 0 for the Luhn-invalid value, so local validation is necessary. Not executed: normalization, zero-upstream-call guarantee, four UI outcome states, omni routing."},
@@ -5049,6 +5068,11 @@ function startView(){
   <button class="btn" data-act="generate" ${S.generating||!docs?'disabled':''}>${S.generating?'Generating…':'Generate stories'}</button>
   <p class="how"><b>How this works.</b> AI drafts → you edit → you save → approved in-app. Nothing leaves this app.</p>`;
 }
+function runLede(){
+  var t='Execute the '+S.tests.length+' test cases';
+  if(S.run.sample)return t+' against <b>sample results</b> \u2014 a labeled, realistic PASS/FAIL mix for demonstration. <b>Not real execution.</b>';
+  return t+'. This is a planning-stage run: <span style="font-family:var(--mono);font-size:13px">no product build exists yet</span>, so the entry criterion \u201cbuild deployed\u201d is not met and cases cannot be asserted against the product.';
+}
 const VIEWS=[
   startView,
   ()=>head('Stories',`${S.stories.length} stories drafted from your documents. Edit anything directly, or open a story for its full detail panel. Dashed or grey-ruled means draft.`,csvBtn('stories'))+
@@ -5057,8 +5081,9 @@ const VIEWS=[
     `<div id="planbox">${planInner()}</div><div class="bar" id="bar">${barHTML('plan')}</div>`,
   ()=>head('Test cases',`${S.tests.length} cases generated from the saved stories and test plan, each tagged with the requirements it proves.`,csvBtn('tests'))+
     covHTML()+`<div id="list">${S.tests.map(testCard).join('')}</div><div class="bar" id="bar">${barHTML('tests')}</div>`,
-  ()=>head('Run',`Execute the ${S.tests.length} test cases. This is a planning-stage run: <span style="font-family:var(--mono);font-size:13px">no product build exists yet</span>, so the entry criterion “build deployed” is not met and cases cannot be asserted against the product.`)+
+  ()=>head('Run',runLede())+
     `<button class="btn" data-act="exec" id="exec" ${S.run.state==='running'?'disabled':''}>${S.run.state==='idle'?'Execute tests':S.run.state==='running'?'Running…':'Run again'}</button>
+    <label class="sampleline"><input type="checkbox" data-act="sample" ${S.run.sample?'checked':''} ${S.run.state==='running'?'disabled':''} aria-label="Sample results mode"> <span><b>Sample results</b> \u2014 show a realistic 11 PASS / 2 FAIL / 2 BLOCKED mix. Clearly labeled demo data; nothing really executes.</span></label>
     <div class="progress"><i id="pg"></i></div><div id="rows"></div><div id="sum"></div>`,
   reportHTML,
 ];
@@ -5177,7 +5202,7 @@ function execute(){
   (function step(){
     if(i>=S.tests.length){r.state='done';S.max=Math.max(S.max,SCR.REPORT);if(S.screen===SCR.RUN)render();else renderSteps();return}
     const t=S.tests[i];r.res[t.id]='RUNNING';if(S.screen===SCR.RUN)paintRun();
-    setTimeout(()=>{r.res[t.id]=FINAL[t.id]||'BLOCKED';if(RESULT_NOTES[t.id])r.notes[t.id]=RESULT_NOTES[t.id];i++;if(S.screen===SCR.RUN)paintRun();setTimeout(step,150)},520);
+    setTimeout(()=>{const fin=r.sample?SAMPLE_FINAL:FINAL,nts=r.sample?SAMPLE_NOTES:RESULT_NOTES;r.res[t.id]=fin[t.id]||'BLOCKED';if(nts[t.id])r.notes[t.id]=nts[t.id];i++;if(S.screen===SCR.RUN)paintRun();setTimeout(step,150)},520);
   })();
 }
 /* ---------- events ---------- */
@@ -5290,6 +5315,7 @@ function handle(e){
   else if(a==='revise')revise(k,i);
   else if(a==='csv'){download(CSVNAME[k],csvRows(k));toast('Exported '+CSVNAME[k])}
   else if(a==='exec')execute();
+  else if(a==='sample'){const r=S.run;if(r.state==='running')return;r.sample=!!b.checked;r.state='idle';r.res={};r.notes={};render();}
   else if(a==='export'){S.exported=true;b.textContent='Exported';$('#exmsg').textContent='Exported as provider-lookup-proof-report.pdf'}
 }
 document.addEventListener('keydown',e=>{
