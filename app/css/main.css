@@ -36,7 +36,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .primary:hover:not(:disabled){filter:brightness(1.1)}
 .primary:disabled{opacity:.5;cursor:not-allowed}
 .ghost:hover,.icon:hover,.sm:hover{background:var(--hover)}
-a.ghost{display:inline-block;color:inherit;text-decoration:none}
 .icon{padding:5px 10px}.sm{padding:3px 8px;font-size:13px}
 input[type=text],input:not([type]),input[type=password],select,textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:#fff}
 textarea{resize:vertical;line-height:1.45}
@@ -129,6 +128,10 @@ main{max-width:1280px;margin:0 auto;padding:24px 20px 80px}
 .modal{position:fixed;inset:0;background:rgba(23,21,59,.4);display:grid;place-items:center;z-index:30}
 .modal-box{background:#fff;border-radius:14px;padding:22px;max-width:460px;width:calc(100% - 32px);box-shadow:0 20px 60px rgba(0,0,0,.25)}
 .modal-box .bar{justify-content:flex-end;margin-bottom:0}
+.modal.docview .modal-box{max-width:920px;max-height:86vh;display:flex;flex-direction:column}
+.docview-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+.docview-head h3{margin:0 0 2px}
+.docview-body{overflow:auto;white-space:pre-wrap;font:13px var(--mono);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--ink);color:#fff;padding:9px 16px;border-radius:10px;opacity:0;pointer-events:none;transition:.25s;z-index:40;max-width:90%}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 /* PIN lock */

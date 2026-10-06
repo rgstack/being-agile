@@ -64,6 +64,7 @@
   function docCard(key, label, d, extraIdx) {
     const id = extraIdx == null ? key : 'x' + extraIdx;
     return '<div class="card doc" data-doc="' + id + '"><h3>' + label +
+      (d.text ? '<button class="sm" data-a="view-doc" data-k="' + id + '" data-label="' + esc(label) + '">View</button>' : '') +
       (extraIdx != null ? '<button class="sm" data-a="rm-extra" data-k="' + extraIdx + '">Remove</button>' : '') + '</h3>' +
       '<div class="drop" data-drop="' + id + '">Drop a .md / .txt file here or <label style="color:var(--accent);cursor:pointer;text-decoration:underline">browse<input type="file" accept=".md,.txt,text/*" data-c="file" data-k="' + id + '"></label>' +
       (d.name ? '<br><b style="color:var(--ink)">' + esc(d.name) + '</b>' : '') + '</div>' +
@@ -71,6 +72,18 @@
       '<div class="meta"><span data-count="' + id + '">' + d.text.length.toLocaleString() + ' chars · ~' + tok(d.text).toLocaleString() + ' tokens</span></div></div>';
   }
   const docRef = (id) => (id[0] === 'x' ? S.docs.extras[+id.slice(1)] : S.docs[id]);
+  function openDocView(d, label) {
+    const m = document.getElementById('doc-view'), box = m.firstElementChild, text = d.text || '';
+    box.innerHTML = '<div class="docview-head"><div><h3>' + esc(d.name || label) + '</h3><span class="meta">' + text.length.toLocaleString() + ' chars · ~' + tok(text).toLocaleString() + ' tokens</span></div>' +
+      '<button class="sm" data-close>Close</button></div><div class="docview-body">' + esc(text) + '</div>';
+    box.querySelector('[data-close]').onclick = () => { m.hidden = true; };
+    m.onclick = (e) => { if (e.target === m) m.hidden = true; };
+    m.hidden = false;
+  }
+  document.addEventListener('keydown', (e) => {
+    const m = document.getElementById('doc-view');
+    if (e.key === 'Escape' && m && !m.hidden) m.hidden = true;
+  });
   function renderStart() {
     const d = S.docs, has = [d.prd, d.design, d.api].concat(d.extras).some((x) => x.text.trim());
     const dry = AI.getConfig().dryRun;
@@ -81,9 +94,7 @@
       d.extras.map((x, i) => docCard('x', 'Supporting doc ' + (i + 1), x, i)).join('') + '</div>' +
       '<div class="bar"><button class="ghost" data-a="add-extra">+ Add another document</button><button class="ghost" data-a="load-sample">Load NPPES sample</button><span class="grow"></span>' +
       '<button class="primary" data-a="gen-stories"' + (has && !ui.busy ? '' : ' disabled') + '>' + (ui.busy ? 'Generating…' : 'Generate stories →') + '</button></div>' +
-      (ui.error ? '<div class="err">' + esc(ui.error) + '</div>' : '') +
-      '<h3>Sample documents</h3><p class="hint">Download, then import above via the document slots.</p>' +
-      '<div class="bar samples"><a class="ghost" href="data/prd.md" download>Sample PRD</a><a class="ghost" href="data/design.md" download>Sample design doc</a><a class="ghost" href="data/api-spec.md" download>Sample API spec</a></div>';
+      (ui.error ? '<div class="err">' + esc(ui.error) + '</div>' : '');
   }
 
   // ---------- 2. Stories ----------
@@ -229,6 +240,7 @@
 
   // ---------- actions ----------
   const A = {
+    'view-doc': (el) => openDocView(docRef(el.dataset.k), el.dataset.label),
     'add-extra': () => { S.docs.extras.push({ name: '', text: '' }); ST.save(); render(); },
     'rm-extra': (el) => { S.docs.extras.splice(+el.dataset.k, 1); ST.save(); render(); },
     'load-sample': () => {
