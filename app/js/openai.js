@@ -16,12 +16,15 @@
   };
   const MODELS = Object.keys(PRICING);
 
-  // Hard per-operation caps (tokens).
+  // Per-operation caps (tokens). Raised for testing Oct 6 2026: input guard at
+  // 50K so large PRD/spec bundles go through; output at 16K = the max the
+  // GPT-4o family accepts (the API rejects max_tokens above the model's limit,
+  // so output cannot be uncapped the way input can).
   const BUDGETS = {
-    stories: { in: 6000, out: 4000 },
-    plan:    { in: 4000, out: 3000 },
-    cases:   { in: 6000, out: 4000 },
-    assist:  { in: 2000, out: 1000 },
+    stories: { in: 50000, out: 16000 },
+    plan:    { in: 50000, out: 16000 },
+    cases:   { in: 50000, out: 16000 },
+    assist:  { in: 50000, out: 16000 },
   };
 
   const PROMPTS = {
