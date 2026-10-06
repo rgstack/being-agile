@@ -312,6 +312,23 @@
       (a.out ? '<div class="ai-prop"><div class="body md">' + MD.render(a.out) + '</div></div>' : '') + '</div>';
   }
   const aiLink = (sec) => '<button class="ai-link" data-a="assist-toggle" data-k="' + sec + '" aria-expanded="' + !!(ui.assist[sec] || {}).open + '">AI assist</button>';
+  // Current draft text behind an assist box, so the model reacts to what's actually written.
+  function assistContext(k) {
+    if (k === 'test plan') {
+      const p = S.draft.plan; if (!p) return '';
+      return Object.keys(PLAN_LABELS).map((key) => '## ' + PLAN_LABELS[key] + '\n' + (Array.isArray(p[key]) ? p[key].join('\n') : (p[key] || ''))).join('\n\n');
+    }
+    if (k.indexOf('case ') === 0) {
+      const c = (S.draft.cases || [])[+k.slice(5)]; if (!c) return '';
+      return 'ID: ' + c.id + '\nRequirement: ' + c.requirement_ref + '\nPriority: ' + c.priority + '\nTitle: ' + c.title +
+        '\nSteps:\n' + c.steps.join('\n') + '\nExpected result:\n' + c.expected;
+    }
+    const s = curStory(); if (!s) return '';
+    if (k === 'description') return s.description;
+    if (k === 'acceptance criteria') return s.acceptance_criteria.join('\n');
+    if (k === 'subtasks') return s.subtasks.map((t) => (t.done ? '[x] ' : '[ ] ') + t.text).join('\n');
+    return '';
+  }
   function subRow(t, i, sid) {
     if (ui.subEdit === sid + '|' + i) {
       return '<li class="edit"><input type="text" class="in" data-i="st-edit" data-k="' + i + '" value="' + esc(t.text) + '" aria-label="Edit subtask" placeholder="Subtask, markdown allowed"><button class="btn btn-s" data-a="st-save" data-k="' + i + '">Save</button><button class="btn btn-q btn-s" data-a="st-cancel" data-k="' + i + '">Cancel</button></li>';
@@ -604,7 +621,13 @@
     'st-cancel': (el) => { const s = curStory(), i = +el.dataset.k; if (!s.subtasks[i].text.trim()) s.subtasks.splice(i, 1); ui.subEdit = null; render(); },
     'st-rm': (el) => { curStory().subtasks.splice(+el.dataset.k, 1); ui.subEdit = null; render(); touch(); },
     'assist-toggle': (el) => { const a = (ui.assist[el.dataset.k] = ui.assist[el.dataset.k] || {}); a.open = !a.open; ui.focus = '[data-i="assist-prompt"][data-k="' + el.dataset.k + '"]'; render(); },
-    assist: async (el) => { const a = ui.assist[el.dataset.k]; a.out = 'Thinking…'; render(); a.out = await AI.assist(el.dataset.k, a.prompt); render(); },
+    assist: async (el) => {
+      const k = el.dataset.k, a = ui.assist[k];
+      a.out = 'Thinking…'; render();
+      try { a.out = await AI.assist(k, a.prompt, assistContext(k)); }
+      catch (e) { a.out = '**Assist failed:** ' + ((e && e.message) || e); }
+      render();
+    },
     'case-add': () => { S.draft.cases.push({ id: 'TC-' + String(S.draft.cases.length + 1).padStart(3, '0'), requirement_ref: '', title: '', steps: [], expected: '', priority: 'P1' }); ui.focus = '[data-i="case"][data-f="title"][data-k="' + (S.draft.cases.length - 1) + '"]'; render(); },
     'case-rm': (el) => { S.draft.cases.splice(+el.dataset.k, 1); clearCaseTabs(); render(); },
     mark: (el) => {

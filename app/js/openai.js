@@ -21,12 +21,14 @@
     stories: { in: 6000, out: 4000 },
     plan:    { in: 4000, out: 3000 },
     cases:   { in: 6000, out: 4000 },
+    assist:  { in: 2000, out: 1000 },
   };
 
   const PROMPTS = {
     stories: 'You are a senior product analyst. Given the PRD, design doc, API spec and supporting docs, produce substantial Jira stories as JSON: [{id, title, description, acceptance_criteria[7-8 items], subtasks[6 items], priority, labels}]. Cover every requirement. No prose outside the JSON.\n\nWrite every story against these rules:\n- INVEST: each story is Independent (buildable and testable on its own), Negotiable (detail open to conversation, not fixed like a contract), Valuable (a user or the business notices when it ships), Estimable (sizable without guessing), Small (fits comfortably inside one iteration), Testable (a clear pass/fail check proves it done).\n- Definition of Ready: the description states who wants what and why (As a... I want... so that...); acceptance criteria are written one per line and each is verifiable; the requirement(s) it covers are linked in labels as REQ-nnn; dependencies and open questions are named; priority is set.\n- Description follows As a / I want / So that. Acceptance criteria: 7-8 items, each a single verifiable check, demonstrated rather than asserted.',
     plan: 'Given the stories, produce a test plan as JSON: {objectives, scope_in, scope_out, approach, entry_criteria[], exit_criteria[], risks[]}.',
     cases: 'Given the test plan and stories, produce test cases as JSON: [{id, requirement_ref, title, steps[], expected, priority}]. Cover all requirements. No prose outside the JSON.\n\nWrite every case against these rules:\n- One objective per case; the title says what it proves.\n- Preconditions stated: role, data, environment and configuration are named, not assumed.\n- Steps are clear and numbered; each step is a single action someone else could repeat exactly.\n- Expected result is unambiguous: specific values, codes and messages, so any two reviewers reach the same pass or fail.\n- Every case carries the REQ-nnn it proves in requirement_ref, so each requirement ends with a verdict.',
+    assist: 'You are a senior product analyst and test strategist. The user is drafting a Jira story, a test plan, or a test case and asks for help improving one item. You receive the item kind, its current text, and their request. Reply in concise markdown with specific, actionable suggestions grounded in the item\'s actual content. Judge it against INVEST (for stories), the Definition of Ready, and the test-case quality rules (one objective, stated preconditions, repeatable numbered steps, unambiguous expected result, REQ-nnn traceability) wherever they apply. If the request asks for a rewrite or an improved version, include it in a fenced code block after the suggestions. Be concrete — quote the weak lines and show the fix.',
   };
 
   const DEFAULT_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
@@ -90,15 +92,8 @@
     throw new BudgetError(msg);
   }
 
-  // LIVE: one JSON-mode chat completion. Returns {data, pt, ct} with real usage from the API.
-  async function liveCall(op, input) {
-    if (!cfg.apiKey && cfg.endpoint === DEFAULT_ENDPOINT) throw new Error('No API key. Enter your OpenAI API key in Settings (gear icon).');
-    const body = {
-      model: cfg.model,
-      response_format: { type: 'json_object' },
-      messages: [{ role: 'system', content: PROMPTS[op] }, { role: 'user', content: inputFor(op, input) }],
-    };
-    body[cfg.model.indexOf('o3') === 0 ? 'max_completion_tokens' : 'max_tokens'] = BUDGETS[op].out;
+  // Shared POST: the only network code in the app. Returns the parsed JSON body.
+  async function postChat(body) {
     const headers = { 'Content-Type': 'application/json' };
     if (cfg.apiKey) headers.Authorization = 'Bearer ' + cfg.apiKey; // custom proxy without a key injects auth itself
     const ctl = new AbortController();
@@ -123,9 +118,21 @@
       if (res.status === 429) throw new Error('429 Rate limited — wait a moment and retry.');
       throw new Error('API error ' + res.status + ': ' + (detail || res.statusText || 'unknown'));
     }
-    let json, data;
+    return res.json();
+  }
+
+  // LIVE: one JSON-mode chat completion. Returns {data, pt, ct} with real usage from the API.
+  async function liveCall(op, input) {
+    if (!cfg.apiKey && cfg.endpoint === DEFAULT_ENDPOINT) throw new Error('No API key. Enter your OpenAI API key in Settings (gear icon).');
+    const body = {
+      model: cfg.model,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'system', content: PROMPTS[op] }, { role: 'user', content: inputFor(op, input) }],
+    };
+    body[cfg.model.indexOf('o3') === 0 ? 'max_completion_tokens' : 'max_tokens'] = BUDGETS[op].out;
+    const json = await postChat(body);
+    let data;
     try {
-      json = await res.json();
       data = JSON.parse(json.choices[0].message.content);
     } catch (e) { throw new Error('Model did not return valid JSON. Retry or use dry-run.'); }
     const u = json.usage || {};
@@ -154,12 +161,39 @@
   const generateTestPlan = (stories) => run('plan', stories);
   const generateTestCases = (plan, stories) => run('cases', { plan, stories });
 
-  // Canned per-item "AI assist" (dry-run only; no network).
-  async function assist(kind, prompt) {
-    await new Promise((r) => setTimeout(r, 250));
+  // AI assist: canned in dry-run; a real model call otherwise (plain-text reply, metered).
+  function assistUserText(kind, prompt, context) {
+    return 'ITEM KIND: ' + kind + '\n\nCURRENT TEXT:\n' + ((context || '').trim() || '(empty — nothing written yet)') +
+      '\n\nREQUEST: ' + ((prompt || '').trim() || 'Suggest concrete improvements.');
+  }
+  async function liveAssist(kind, prompt, context) {
+    if (!cfg.apiKey && cfg.endpoint === DEFAULT_ENDPOINT) throw new Error('No API key. Enter your OpenAI API key in Settings (gear icon), or keep dry-run on for a canned suggestion.');
+    const user = assistUserText(kind, prompt, context);
+    const inTok = estTokens(PROMPTS.assist) + estTokens(user);
+    if (inTok > BUDGETS.assist.in) throw new BudgetError('Assist input (~' + inTok.toLocaleString() + ' tokens) is over the assist budget of ' + BUDGETS.assist.in.toLocaleString() + ' tokens. Shorten the request or the item text.');
+    const body = {
+      model: cfg.model,
+      messages: [{ role: 'system', content: PROMPTS.assist }, { role: 'user', content: user }],
+    };
+    body[cfg.model.indexOf('o3') === 0 ? 'max_completion_tokens' : 'max_tokens'] = BUDGETS.assist.out;
+    const json = await postChat(body);
+    const text = json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
+    if (!text) throw new Error('Model returned an empty response. Retry.');
+    const u = json.usage || {};
+    return { text, pt: u.prompt_tokens || 0, ct: u.completion_tokens || 0 };
+  }
+  async function assist(kind, prompt, context) {
     const p = (prompt || '').trim();
-    return 'Dry-run suggestion' + (p ? ' for "' + p.slice(0, 60) + '"' : '') + ': make the ' + kind +
-      ' observable and testable — name the actor, the trigger and the exact system response, and add one negative case. (Canned note; no AI call was made.)';
+    if (cfg.dryRun) {
+      await new Promise((r) => setTimeout(r, 250));
+      return 'Dry-run suggestion' + (p ? ' for "' + p.slice(0, 60) + '"' : '') + ': make the ' + kind +
+        ' observable and testable — name the actor, the trigger and the exact system response, and add one negative case. (Canned note; turn off dry-run to get a real suggestion.)';
+    }
+    const { text, pt, ct } = await liveAssist(kind, p, context);
+    const rec = { operation: 'assist', model: cfg.model, prompt_tokens: pt, completion_tokens: ct, est_usd: usd(cfg.model, pt, ct), at: Date.now(), dry_run: false };
+    calls.push(rec);
+    listeners.forEach((f) => f(getUsage()));
+    return text;
   }
 
   function getUsage() {
