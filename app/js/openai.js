@@ -160,6 +160,17 @@
     throw new Error('Model returned an unexpected shape for ' + op + ' (expected a JSON array). Retry — or switch to dry-run.');
   }
 
+  // The plan prompt asks for a bare object, which matches json_object mode — but the
+  // model may still wrap it ({"plan": {...}}). Unwrap the same defensive way.
+  function extractPlan(data) {
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      if (data.objectives || data.scope_in || data.scope) return data;
+      const vals = Object.values(data);
+      if (vals.length === 1 && vals[0] && typeof vals[0] === 'object' && !Array.isArray(vals[0])) return vals[0];
+    }
+    return data;
+  }
+
   async function run(op, input) {
     const est = estimateCall(op, input);
     const warning = checkBudget(op, est);
@@ -173,6 +184,7 @@
       ({ data, pt, ct } = await liveCall(op, input));
     }
     if (op === 'stories' || op === 'cases') data = extractArray(op, data);
+    if (op === 'plan') data = extractPlan(data);
     const rec = { operation: op, model: cfg.model, prompt_tokens: pt, completion_tokens: ct, est_usd: usd(cfg.model, pt, ct), at: Date.now(), dry_run: cfg.dryRun };
     calls.push(rec);
     listeners.forEach((f) => f(getUsage()));
