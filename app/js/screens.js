@@ -765,6 +765,9 @@
     S = ST.reset(); AI.loadUsage([]); ui.assist = {}; ui.paste = {}; ui.write = {}; ui.subEdit = null; ui.error = ''; ui.trace = null; ui.open = new Set(); ui.runOpen = new Set(); closeSheet(); drawer.hidden = true; $('btn-gear').setAttribute('aria-expanded', 'false'); store((s) => s.removeItem(KEYSTORE)); keyEl.value = ''; AI.configure({ apiKey: '' }); render(); toast('Demo reset');
   };
 
+  // ---------- build version stamp (bottom-left), auto-read from the ?v= cache-buster ----------
+  (() => { const el = $('appver'); if (!el) return; let v = ''; try { const sc = document.querySelector('script[src*="js/screens.js"]'); const m = sc && /[?&]v=([\w.-]+)/.exec(sc.src); if (m) v = m[1]; } catch (e) {} el.textContent = v ? 'v' + v : ''; })();
+
   // ---------- init ----------
   setTheme(document.documentElement.dataset.theme === 'dark');
   AI.configure({ model: S.model, dryRun: S.dryRun !== false, endpoint: S.endpoint || AI.DEFAULT_ENDPOINT });

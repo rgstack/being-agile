@@ -1029,3 +1029,5 @@ input[type="checkbox"] { accent-color: var(--ink); width: 15px; height: 15px; ma
 .mm-fail pre { font: 12.5px/1.5 var(--mono); background: var(--wash); border-radius: 10px; padding: 12px 14px; overflow: auto; max-height: 180px; color: var(--ink-2); }
 .mm-fail pre code { font: inherit; }
 .cov-map .mm { max-height: 360px; overflow: auto; }
+/* Build version stamp, bottom-left (auto-set from the screens.js ?v= cache-buster) */
+.appver { position: fixed; left: 10px; bottom: 8px; font-size: 10px; color: var(--ink-3); opacity: .8; pointer-events: none; z-index: 60; }
