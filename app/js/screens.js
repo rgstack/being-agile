@@ -652,6 +652,7 @@
       const path = 's|' + s.id + '|' + fld;
       setRT(path, applyText(a.out));
       ui.write[path] = true; // keep the Write tab open so the applied text is visible
+      delete ui.assist[k]; // response goes away, prompt cleared, box closed — fresh state
       touch(); render(); toast('Applied AI suggestion — review it, then Save all');
     },
     'case-add': () => { S.draft.cases.push({ id: 'TC-' + String(S.draft.cases.length + 1).padStart(3, '0'), requirement_ref: '', title: '', steps: [], expected: '', priority: 'P1' }); ui.focus = '[data-i="case"][data-f="title"][data-k="' + (S.draft.cases.length - 1) + '"]'; render(); },
