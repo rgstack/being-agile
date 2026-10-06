@@ -4,8 +4,7 @@ A clickable, browser-based design prototype for **Being Agile**: turning plannin
 documents (PRD, design doc, API spec) into human-reviewed user stories, test
 assets, execution results, and requirement-level proof.
 
-**Live demo:** open `index.html` (or the GitHub Pages URL) in any browser —
-no build step, no server, works offline.
+**Live demo:** https://rgstack.github.io/being-agile/app/ — no build step, no server.
 
 ## The flow
 
