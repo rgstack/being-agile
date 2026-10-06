@@ -1,53 +1,67 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Being Agile · PRD to proof (working prototype)</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 16'%3E%3Ccircle cx='7' cy='8' r='5.6' fill='none' stroke='%2369736e' stroke-width='1.8'/%3E%3Ccircle cx='22' cy='8' r='5.6' fill='none' stroke='%230b7a57' stroke-width='1.8'/%3E%3Cpath d='M22 2.4a5.6 5.6 0 0 0 0 11.2z' fill='%230b7a57'/%3E%3Ccircle cx='37' cy='8' r='6.5' fill='%230b7a57'/%3E%3C/svg%3E">
+<script>try{if(localStorage.getItem('being-agile-theme')==='dark')document.documentElement.dataset.theme='dark';}catch(e){}</script>
 <link rel="stylesheet" href="css/main.css">
 </head>
 <body>
-<header class="top">
-  <div class="top-in">
-    <div class="top-row">
-      <div class="brand"><i class="mark" aria-hidden="true"></i>Being Agile<small>PRD to proof</small></div>
-      <div class="tools">
-        <span id="meter" class="meter" title="Estimated usage this browser session (dry-run: no real spend)"></span>
-        <button id="btn-reset" class="ghost" title="Clear all saved demo state">Reset demo</button>
-        <button id="btn-gear" class="icon" aria-label="Settings" title="Settings">⚙</button>
-      </div>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span class="marks" aria-hidden="true"><i class="mark"></i><i class="mark" data-v="partial"></i><i class="mark" data-v="proven"></i></span>Being Agile</div>
+    <nav id="steps" class="stages" aria-label="Stages"></nav>
+    <div id="proof" class="proof"></div>
+  </aside>
+  <div class="main">
+    <header class="top">
+      <span class="proj">Being Agile</span>
+      <span id="top-marks" class="top-marks" role="group" aria-label="Requirement trace"></span>
+      <span id="traceslot"></span>
+      <span class="sp"></span>
+      <span id="savestate" class="save-state" role="status">All changes saved</span>
+      <button id="saveall" class="btn" data-a="save-all" disabled>Save all</button>
+      <button id="btn-theme" class="icon-btn" data-a="theme" aria-label="Switch to the dark theme"></button>
+      <span id="meter" class="tokmeter" title="Estimated usage this browser session (dry-run: no real spend)"></span>
+      <button id="btn-gear" class="icon-btn" aria-label="Settings" title="Settings" aria-expanded="false"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1"/></svg></button>
+    </header>
+    <div id="stage" class="stage">
+      <main id="view" class="view" tabindex="-1"></main>
+      <div id="scrim" class="scrim" data-a="sheet-close"></div>
+      <aside id="sheet" class="sheet" aria-label="Details"></aside>
     </div>
-    <nav id="steps" class="steps" aria-label="Steps"></nav>
   </div>
-</header>
-
-<main id="app"></main>
+</div>
 
 <aside id="drawer" class="drawer" hidden aria-label="Settings">
-  <div class="drawer-head"><h2>Settings</h2><button id="btn-drawer-close" class="icon" aria-label="Close">✕</button></div>
-  <label class="fld">OpenAI API key
-    <input id="set-key" type="password" autocomplete="off" spellcheck="false" placeholder="Not needed in dry-run">
-  </label>
-  <label class="chk"><input id="set-keep" type="checkbox"> Remember key for this session</label>
-  <p class="hint warn-text">Key is stored in this browser session only. It is never written to localStorage, exports or logs. Optional when a custom endpoint/proxy is used.</p>
-  <label class="fld">API endpoint
-    <input id="set-endpoint" type="url" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1/chat/completions">
-  </label>
-  <p id="set-endpoint-err" class="hint warn-text" hidden></p>
-  <p class="hint">Default calls OpenAI directly. For a corporate proxy, paste its chat-completions URL — the API key then becomes optional.</p>
-  <label class="fld">Model
-    <select id="set-model"></select>
-  </label>
-  <label class="chk"><input id="set-dry" type="checkbox" checked> Dry-run (simulated responses, zero network calls)</label>
-  <p class="hint">Dry-run: simulated responses, zero network calls. Uncheck to call OpenAI live with your key (metered).</p>
-  <h3>Usage (estimates)</h3>
-  <div id="usage"></div>
-  <p class="hint">Prices are estimates per 1M tokens in/out: gpt-4o-mini $0.15/$0.60 · gpt-4o $2.50/$10.00 · o3-mini $1.10/$4.40. Tokens are estimated at ~4 characters each.</p>
-  <h3>App PIN</h3>
-  <div id="pin-settings"></div>
+  <div class="drawer-head"><h2>Settings</h2><button id="btn-drawer-close" class="icon-btn" aria-label="Close"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
+  <div class="drawer-body">
+    <label class="fld">OpenAI API key
+      <input id="set-key" class="in" type="password" autocomplete="off" spellcheck="false" placeholder="Not needed in dry-run">
+    </label>
+    <label class="chk"><input id="set-keep" type="checkbox"> Remember key for this session</label>
+    <p class="hint warn-text">Key is stored in this browser session only. It is never written to localStorage, exports or logs. Optional when a custom endpoint/proxy is used.</p>
+    <label class="fld">API endpoint
+      <input id="set-endpoint" class="in" type="url" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1/chat/completions">
+    </label>
+    <p id="set-endpoint-err" class="hint warn-text" hidden></p>
+    <p class="hint">Default calls OpenAI directly. For a corporate proxy, paste its chat-completions URL — the API key then becomes optional.</p>
+    <label class="fld">Model
+      <select id="set-model" class="in"></select>
+    </label>
+    <label class="chk"><input id="set-dry" type="checkbox" checked> Dry-run (simulated responses, zero network calls)</label>
+    <p class="hint">Dry-run: simulated responses, zero network calls. Uncheck to call OpenAI live with your key (metered).</p>
+    <h3>Usage (estimates)</h3>
+    <div id="usage"></div>
+    <p class="hint">Prices are estimates per 1M tokens in/out: gpt-4o-mini $0.15/$0.60 · gpt-4o $2.50/$10.00 · o3-mini $1.10/$4.40. Tokens are estimated at ~4 characters each.</p>
+    <h3>App PIN</h3>
+    <div id="pin-settings"></div>
+    <div class="reset-row"><button id="btn-reset" class="btn btn-q btn-s" title="Clear all saved demo state">Reset demo</button></div>
+  </div>
 </aside>
-
-<aside id="doc-panel" class="doc-panel" hidden aria-label="Document viewer"></aside>
 
 <div id="modal" class="modal" hidden><div class="modal-box" role="dialog" aria-modal="true"></div></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
