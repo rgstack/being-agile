@@ -56,6 +56,22 @@
     id: c.id, requirement_ref: c.requirement_ref || c.requirement || '', title: c.title || '',
     steps: (c.steps || []).slice(), expected: c.expected || '', priority: c.priority || 'P1',
   });
+  // The model sometimes nests objects inside the plan's list fields; without
+  // coercion the UI renders "[object Object]". Normalize to plain strings.
+  const PLAN_TEXT_KEYS = ['objectives', 'approach'];
+  const PLAN_LIST_KEYS = ['scope_in', 'scope_out', 'entry_criteria', 'exit_criteria', 'risks'];
+  function planItemText(x) {
+    if (typeof x === 'string') return x;
+    if (x && typeof x === 'object') return x.text || x.item || x.title || x.name || x.description || JSON.stringify(x);
+    return x == null ? '' : String(x);
+  }
+  function normPlan(p) {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return p;
+    const o = {};
+    PLAN_TEXT_KEYS.forEach((k) => { o[k] = typeof p[k] === 'string' ? p[k] : (Array.isArray(p[k]) ? p[k].map(planItemText).join('\n') : planItemText(p[k])); });
+    PLAN_LIST_KEYS.forEach((k) => { o[k] = Array.isArray(p[k]) ? p[k].map(planItemText).map((t) => t.trim()).filter(Boolean) : (typeof p[k] === 'string' ? p[k].split('\n').map((t) => t.trim()).filter(Boolean) : []); });
+    return o;
+  }
 
   const unlocked = (i) => i === 0 || (i === 1 && S.stories.length > 0) || (i === 2 && S.stories.length > 0) ||
     (i === 3 && !!S.plan) || ((i === 4 || i === 5) && S.cases.length > 0);
@@ -90,7 +106,7 @@
   }
 
   window.State = {
-    STEPS, clone, load, save, reset, normStory, normCase, unlocked, verdict, setSampleResults,
+    STEPS, clone, load, save, reset, normStory, normCase, normPlan, unlocked, verdict, setSampleResults,
     get: () => S,
   };
 })();

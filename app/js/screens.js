@@ -311,15 +311,61 @@
     const order = { phase: 0, area: 1, req: 2 };
     return labels.slice().sort((a, b) => order[catKind(a)] - order[catKind(b)]).map((l) => (catKind(l) === 'req' ? reqChip(l.toUpperCase()) : '<span class="label">' + esc(l) + '</span>')).join('');
   }
-  // Apply is offered only where the assist box maps to a single editable field.
-  const APPLYABLE = { 'description': 'desc', 'acceptance criteria': 'ac' };
+  // Apply is offered on every assist box: the AI returns only the improved item,
+  // so one click replaces the field(s) with it. Structured targets (subtasks,
+  // plan sections, case fields) are parsed back from the AI's text.
+  const APPLYABLE = { 'description': 1, 'acceptance criteria': 1, 'subtasks': 1, 'test plan': 1 };
+  const canApply = (sec) => APPLYABLE[sec] || sec.indexOf('case ') === 0;
   // Prefer the fenced code block (the AI's rewrite) over the full reply.
   function applyText(md) { const m = /```(?:[a-zA-Z0-9_-]*\n)?([\s\S]*?)```/.exec(md || ''); return (m ? m[1] : (md || '')).trim(); }
+  // Parse the AI's improved test plan back into fields via its ## section headers.
+  function parsePlanApply(text) {
+    const KEYS = [
+      ['objectives', ['objectives']],
+      ['scope_in', ['scopein', 'inscope']],
+      ['scope_out', ['scopeout', 'outofscope']],
+      ['approach', ['approach']],
+      ['entry_criteria', ['entrycriteria']],
+      ['exit_criteria', ['exitcriteria']],
+      ['risks', ['risks']],
+    ];
+    const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const secs = {}; let cur = null;
+    text.split('\n').forEach((raw) => {
+      const hm = /^##\s+(.+?)\s*$/.exec(raw);
+      if (hm) {
+        const h = norm(hm[1]); cur = null;
+        KEYS.forEach(([key, words]) => { if (!cur && words.some((w) => h.indexOf(w) !== -1)) cur = key; });
+        if (cur && !secs[cur]) secs[cur] = [];
+      } else if (cur) secs[cur].push(raw);
+    });
+    const out = {};
+    Object.keys(secs).forEach((k) => { const t = secs[k].join('\n').trim(); if (t) out[k] = t; });
+    return out;
+  }
+  // Parse the AI's improved test case back into fields (Title/Requirement/
+  // Priority/Steps/Expected result). Only non-empty fields are applied.
+  function parseCaseApply(text) {
+    const out = { steps: [], expected: [] };
+    let section = null;
+    text.split('\n').forEach((raw) => {
+      const l = raw.trim(), m = /^([A-Za-z ]+):\s*(.*)$/.exec(l), k = m ? m[1].trim().toLowerCase() : null;
+      if (k === 'title') { out.title = m[2].trim(); section = null; return; }
+      if (k === 'requirement' || k === 'requirement ref') { out.requirement_ref = m[2].trim(); section = null; return; }
+      if (k === 'priority') { out.priority = m[2].trim().toUpperCase(); section = null; return; }
+      if (k === 'steps' || k === 'step') { section = 'steps'; if (m[2].trim()) out.steps.push(m[2].trim()); return; }
+      if (k === 'expected result' || k === 'expected') { section = 'expected'; if (m[2].trim()) out.expected.push(m[2].trim()); return; }
+      if (section === 'steps' && l) out.steps.push(l.replace(/^\d+[.)]\s+/, ''));
+      else if (section === 'expected' && l) out.expected.push(l);
+    });
+    out.expected = out.expected.join('\n');
+    return out;
+  }
   function assistBox(sec) {
     const a = ui.assist[sec] || {};
     return '<div class="assist" ' + (a.open ? '' : 'hidden') + '><div class="ai-box"><span class="ai-tag">AI</span><input data-i="assist-prompt" data-k="' + sec + '" placeholder="Ask AI to improve this…" aria-label="Ask AI to improve ' + displayKind(sec) + '" value="' + esc(a.prompt || '') + '"><button class="ai-go" data-a="assist" data-k="' + sec + '">Ask</button></div>' +
       '<div class="ai-hint">Don\u2019t include sensitive information in your request \u2014 it goes to the AI service.</div>' +
-      (a.out ? '<div class="ai-prop"><div class="body md">' + MD.render(a.out) + '</div>' + (a.ok && APPLYABLE[sec] ? '<button class="btn btn-s" data-a="assist-apply" data-k="' + sec + '" title="Replace this field with the AI response (uses the fenced code block if the AI included one)">Apply</button>' : '') + '</div>' : '') + '</div>';
+      (a.out ? '<div class="ai-prop"><div class="body md">' + MD.render(a.out) + '</div>' + (a.ok && canApply(sec) ? '<button class="btn btn-s" data-a="assist-apply" data-k="' + sec + '" title="Replace with the AI response">Apply</button>' : '') + '</div>' : '') + '</div>';
   }
   const aiLink = (sec) => '<button class="ai-link" data-a="assist-toggle" data-k="' + sec + '" aria-expanded="' + !!(ui.assist[sec] || {}).open + '">AI assist</button>';
   // 'case 0' -> 'case 1' for anything the user reads; keys stay zero-indexed.
@@ -398,9 +444,9 @@
     return rt('plan|' + k, v, isList ? 'ac' : '', 3) + (isList ? '<p class="hint" style="margin-top:6px">One per line</p>' : '');
   }
   function renderPlan() {
-    const p = S.draft.plan;
     const lede = 'A strategy-level plan derived from the saved stories: scope, approach, criteria and risks. List sections take one item per line.';
-    if (!p) return head('Test plan', lede) + '<div class="empty-card"><p>No plan yet — generate one from the saved stories.</p>' + genBtn(false, 'gen-plan', 'Generate test plan') + '</div>' + errBox();
+    if (!S.draft.plan) return head('Test plan', lede) + '<div class="empty-card"><p>No plan yet — generate one from the saved stories.</p>' + genBtn(false, 'gen-plan', 'Generate test plan') + '</div>' + errBox();
+    const p = S.draft.plan = ST.normPlan(S.draft.plan); // heal plans saved before normalization existed
     const sec = (title, body) => '<section class="plan-sec"><h2>' + title + '</h2><div>' + body + '</div></section>';
     return head('Test plan', lede, aiLink('test plan') + csvBtn('csv-plan') + genBtn(true, 'gen-plan')) + assistBox('test plan') + errBox() +
       '<div class="plan">' + sec('Objectives', planBlock(p, 'objectives')) +
@@ -607,7 +653,7 @@
       S.plan = null; S.draft.plan = null; S.cases = []; S.draft.cases = null; S.results = {}; S.sampleResults = false; ui.write = {}; ui.subEdit = null; ui.sheet = null;
       S.sel = S.stories[0] && S.stories[0].id; S.step = 1; ui.enter = true;
     }),
-    'gen-plan': () => { if (anyDirty() && !confirm('Unsaved edits will not be used. Continue with last saved stories?')) return; return guarded('plan', S.stories, 'Generate test plan', (data) => { S.plan = data; S.draft.plan = ST.clone(data); S.cases = []; S.draft.cases = null; S.results = {}; S.sampleResults = false; Object.keys(ui.write).forEach((k) => { if (k.indexOf('plan|') === 0) delete ui.write[k]; }); clearCaseTabs(); }); },
+    'gen-plan': () => { if (anyDirty() && !confirm('Unsaved edits will not be used. Continue with last saved stories?')) return; return guarded('plan', S.stories, 'Generate test plan', (data) => { S.plan = ST.normPlan(data); S.draft.plan = ST.clone(S.plan); S.cases = []; S.draft.cases = null; S.results = {}; S.sampleResults = false; Object.keys(ui.write).forEach((k) => { if (k.indexOf('plan|') === 0) delete ui.write[k]; }); clearCaseTabs(); }); },
     'gen-cases': () => guarded('cases', { plan: S.plan, stories: S.stories }, 'Generate test cases', (data) => { S.cases = data.map(ST.normCase); S.draft.cases = ST.clone(S.cases); S.results = {}; S.sampleResults = false; clearCaseTabs(); }),
     'save-all': saveAll,
     'csv-stories': () => { cleanDraft(); toast('Downloaded ' + CSV.download('stories', CSV.storiesToCsv(S.draft.stories))); },
@@ -646,12 +692,37 @@
       render();
     },
     'assist-apply': (el) => {
-      const k = el.dataset.k, a = ui.assist[k] || {}, fld = APPLYABLE[k];
-      if (!a.ok || !a.out || !fld) return;
-      const s = curStory(); if (!s) return;
-      const path = 's|' + s.id + '|' + fld;
-      setRT(path, applyText(a.out));
-      ui.write[path] = true; // keep the Write tab open so the applied text is visible
+      const k = el.dataset.k, a = ui.assist[k] || {};
+      if (!a.ok || !a.out) return;
+      const text = applyText(a.out);
+      let n = 0;
+      if (k === 'description' || k === 'acceptance criteria') {
+        const s = curStory(); if (!s) return;
+        const path = 's|' + s.id + '|' + (k === 'description' ? 'desc' : 'ac');
+        setRT(path, text); ui.write[path] = true; n = 1; // keep the Write tab open on the applied text
+      } else if (k === 'subtasks') {
+        const s = curStory(); if (!s) return;
+        const lines = text.split('\n').map((l) => l.trim().replace(/^([-*•]|\d+[.)])\s+/, '')).filter(Boolean);
+        if (!lines.length) { toast('Nothing to apply'); return; }
+        const doneBy = {};
+        s.subtasks.forEach((t) => { doneBy[t.text.trim().toLowerCase()] = t.done; });
+        s.subtasks = lines.map((t) => ({ text: t, done: !!doneBy[t.toLowerCase()] }));
+        n = lines.length;
+      } else if (k === 'test plan') {
+        const p = S.draft.plan; if (!p) return;
+        const secs = parsePlanApply(text), keys = Object.keys(secs);
+        if (!keys.length) { toast("Couldn't match the AI response to plan sections — nothing applied"); return; }
+        keys.forEach((key) => { setRT('plan|' + key, secs[key]); ui.write['plan|' + key] = true; n++; });
+      } else if (k.indexOf('case ') === 0) {
+        const i = +k.slice(5), c = (S.draft.cases || [])[i]; if (!c) return;
+        const pc = parseCaseApply(text);
+        if (pc.title) { c.title = pc.title; n++; }
+        if (pc.requirement_ref) { c.requirement_ref = pc.requirement_ref; n++; }
+        if (pc.priority && PRIOS.indexOf(pc.priority) !== -1) { c.priority = pc.priority; n++; }
+        if (pc.steps.length) { c.steps = pc.steps; ui.write['case|' + i + '|steps'] = true; n++; }
+        if (pc.expected) { c.expected = pc.expected; ui.write['case|' + i + '|expected'] = true; n++; }
+        if (!n) { toast("Couldn't parse the AI response — nothing applied"); return; }
+      } else return;
       delete ui.assist[k]; // response goes away, prompt cleared, box closed — fresh state
       touch(); render(); toast('Applied AI suggestion — review it, then Save all');
     },
