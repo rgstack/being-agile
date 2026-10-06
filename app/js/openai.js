@@ -49,6 +49,10 @@
     if (typeof o.endpoint === 'string') cfg.endpoint = o.endpoint || DEFAULT_ENDPOINT;
   }
   const getConfig = () => ({ model: cfg.model, dryRun: cfg.dryRun, hasKey: !!cfg.apiKey, endpoint: cfg.endpoint, isCustom: cfg.endpoint !== DEFAULT_ENDPOINT }); // never exposes the key
+  // Defensive: browser/autofill managers may fill #set-key without firing input events.
+  // At call time, fall back to the field's live value so a visibly-filled key is never ignored.
+  const domKey = () => { try { const el = document.getElementById('set-key'); return (el && el.value ? el.value : '').trim(); } catch (e) { return ''; } };
+  const effKey = () => cfg.apiKey || domKey();
   const hostOf = (u) => { try { return new URL(u).hostname; } catch (e) { return u; } };
 
   const estTokens = (v) => Math.ceil((typeof v === 'string' ? v : JSON.stringify(v) || '').length / 4);
@@ -98,7 +102,7 @@
   // Shared POST: the only network code in the app. Returns the parsed JSON body.
   async function postChat(body) {
     const headers = { 'Content-Type': 'application/json' };
-    if (cfg.apiKey) headers.Authorization = 'Bearer ' + cfg.apiKey; // custom proxy without a key injects auth itself
+    const k = effKey(); if (k) headers.Authorization = 'Bearer ' + k; // custom proxy without a key injects auth itself
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 120000);
     let res;
@@ -126,7 +130,7 @@
 
   // LIVE: one JSON-mode chat completion. Returns {data, pt, ct} with real usage from the API.
   async function liveCall(op, input) {
-    if (!cfg.apiKey && cfg.endpoint === DEFAULT_ENDPOINT) throw new Error('No API key. Enter your OpenAI API key in Settings (gear icon).');
+    if (!effKey() && cfg.endpoint === DEFAULT_ENDPOINT) throw new Error('No API key. Enter your OpenAI API key in Settings (gear icon).');
     const body = {
       model: cfg.model,
       response_format: { type: 'json_object' },
@@ -170,7 +174,7 @@
       '\n\nREQUEST: ' + ((prompt || '').trim() || 'Suggest concrete improvements.');
   }
   async function liveAssist(kind, prompt, context) {
-    if (!cfg.apiKey && cfg.endpoint === DEFAULT_ENDPOINT) throw new Error('No API key. Enter your OpenAI API key in Settings (gear icon), or keep dry-run on for a canned suggestion.');
+    if (!effKey() && cfg.endpoint === DEFAULT_ENDPOINT) throw new Error('No API key. Enter your OpenAI API key in Settings (gear icon), or keep dry-run on for a canned suggestion.');
     const user = assistUserText(kind, prompt, context);
     const inTok = estTokens(PROMPTS.assist) + estTokens(user);
     if (inTok > BUDGETS.assist.in) throw new BudgetError('Assist input (~' + inTok.toLocaleString() + ' tokens) is over the assist budget of ' + BUDGETS.assist.in.toLocaleString() + ' tokens. Shorten the request or the item text.');

@@ -759,7 +759,9 @@
   modelEl.onchange = () => { S.model = modelEl.value; AI.configure({ model: S.model }); ST.save(); render(); };
   const KEYSTORE = 'being-agile-api-key'; // localStorage, per Rajan's call Oct 6 2026: his key, his risk; clear via field or Reset demo
   const store = (fn) => { try { return fn(localStorage); } catch (e) { return null; } };
-  keyEl.oninput = () => { const v = keyEl.value; AI.configure({ apiKey: v }); store((s) => (v ? s.setItem(KEYSTORE, v) : s.removeItem(KEYSTORE))); };
+  const syncKey = () => { const v = keyEl.value.trim(); AI.configure({ apiKey: v }); store((s) => (v ? s.setItem(KEYSTORE, v) : s.removeItem(KEYSTORE))); };
+  keyEl.addEventListener('input', syncKey);
+  keyEl.addEventListener('change', syncKey); // change fires for autofill/password-manager fills that skip input events
   $('btn-reset').onclick = async () => {
     if (!(await confirmBox('Reset demo?', '<p>This clears all saved documents, stories, plan, cases and results from this browser.</p>', 'Reset'))) return;
     S = ST.reset(); AI.loadUsage([]); ui.assist = {}; ui.paste = {}; ui.write = {}; ui.subEdit = null; ui.error = ''; ui.trace = null; ui.open = new Set(); ui.runOpen = new Set(); closeSheet(); drawer.hidden = true; $('btn-gear').setAttribute('aria-expanded', 'false'); store((s) => s.removeItem(KEYSTORE)); keyEl.value = ''; AI.configure({ apiKey: '' }); render(); toast('Demo reset');
