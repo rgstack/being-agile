@@ -3,7 +3,7 @@
    Read-only text goes through Markdown (marked -> DOMPurify, mermaid fences painted as diagrams); editing stays raw text in Write tabs. */
 (function () {
   'use strict';
-  const AI = window.OpenAI, ST = window.State, CSV = window.CSV, MD = window.Markdown;
+  const AI = window.OpenAI, ST = window.State, CSV = window.CSV, MD = window.Markdown, RL = window.Rules;
   let S = ST.load();
   const $ = (id) => document.getElementById(id);
   const shell = document.querySelector('.app'), stage = $('stage'), view = $('view'), sheetEl = $('sheet');
@@ -14,7 +14,7 @@
   const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
   const rows = (s, min) => Math.max(min || 2, Math.min(14, String(s).split('\n').length + 1));
   // write: field path -> true when the Write tab is chosen (Preview is the default); subEdit: "storyId|index" of the subtask being edited
-  // sheet: null | 'story' | 'doc'; open/runOpen: expanded report rows / run rows; trace: requirement being traced
+  // sheet: null | 'story' | 'doc' | 'rules'; open/runOpen: expanded report rows / run rows; trace: requirement being traced
   const ui = { busy: false, error: '', assist: {}, focus: null, paste: {}, write: {}, subEdit: null, docOpener: null, sheet: null, docId: null, docLabel: '', trace: null, open: new Set(), runOpen: new Set(), rfilter: 'all', pfilter: 'all', justSaved: false, scrollTo: null, enter: false, vm: {} };
 
   // ---------- icons (the design's 16px line set) ----------
@@ -237,6 +237,19 @@
     view.querySelectorAll('.doc').forEach((r) => r.classList.toggle('on', r.dataset.doc === id));
     sheetEl.querySelector('[data-a="sheet-close"]').focus();
   }
+  // ---------- Rules & Philosophy (read-only reference; generation prompts follow these rules) ----------
+  function sheetRules() {
+    return '<div class="sheet-head"><span class="sheet-kicker">' + esc(RL.title) + '</span><span class="sp"></span>' +
+      '<button class="icon-btn" data-a="sheet-close" aria-label="Close rules">' + ic('x') + '</button><span class="sheet-prog" aria-hidden="true"></span></div>' +
+      '<div class="sheet-body"><article class="md doc-md sheet-swap">' + MD.render(RL.markdown) + '</article></div>';
+  }
+  function openRulesSheet() {
+    ui.sheet = 'rules'; ui.subEdit = null;
+    sheetEl.innerHTML = sheetRules(); sheetEl.setAttribute('aria-label', RL.title);
+    stage.dataset.sheet = 'rules'; stage.classList.add('open');
+    MD.paintMermaid(sheetEl);
+    sheetEl.querySelector('[data-a="sheet-close"]').focus();
+  }
   function paintSheet(keepTop) {
     if (ui.sheet === 'story' && (S.step !== 1 || !curStory())) ui.sheet = null;
     if (ui.sheet === 'doc' && S.step !== 0) ui.sheet = null;
@@ -245,7 +258,7 @@
       stage.dataset.sheet = 'story'; stage.classList.add('open');
       const b = sheetEl.querySelector('.sheet-body'); if (b && keepTop) b.scrollTop = keepTop;
       hydrate(sheetEl);
-    } else if (ui.sheet !== 'doc') { stage.classList.remove('open'); delete stage.dataset.sheet; }
+    } else if (ui.sheet !== 'doc' && ui.sheet !== 'rules') { stage.classList.remove('open'); delete stage.dataset.sheet; }
   }
   sheetEl.addEventListener('scroll', (e) => {
     const b = e.target; if (!b.classList || !b.classList.contains('sheet-body')) return;
@@ -536,6 +549,7 @@
   const A = {
     'open-doc': (el) => openDocSheet(docRef(el.dataset.k), el.dataset.label, el.dataset.k),
     'sheet-close': closeSheet,
+    'open-rules': () => { if (ui.sheet === 'rules') closeSheet(); else openRulesSheet(); },
     theme: () => setTheme(document.documentElement.dataset.theme !== 'dark'),
     trace: (el) => {
       const id = el.dataset.k;

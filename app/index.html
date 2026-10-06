@@ -26,6 +26,7 @@
       <button id="saveall" class="btn" data-a="save-all" disabled>Save all</button>
       <button id="btn-theme" class="icon-btn" data-a="theme" aria-label="Switch to the dark theme"></button>
       <span id="meter" class="tokmeter" title="Estimated usage this browser session (dry-run: no real spend)"></span>
+      <button id="btn-rules" class="btn btn-q btn-s" data-a="open-rules" title="Rules &amp; Philosophy">Rules</button>
       <button id="btn-gear" class="icon-btn" aria-label="Settings" title="Settings" aria-expanded="false"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1"/></svg></button>
     </header>
     <div id="stage" class="stage">
@@ -77,6 +78,7 @@
 <!-- mermaid via CDN, deferred so a slow CDN never blocks app boot (markdown.js waits for it at diagram-paint time) -->
 <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <script src="js/markdown.js"></script>
+<script src="js/rules.js"></script>
 <script src="js/screens.js"></script>
 </body>
 </html>
