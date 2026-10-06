@@ -45,8 +45,8 @@
   function normStory(s) {
     return {
       id: s.id, title: s.title || '', description: s.description || '',
-      acceptance_criteria: (s.acceptance_criteria || []).slice(),
-      subtasks: (s.subtasks || []).map((t) => (typeof t === 'string' ? { text: t, done: false } : { text: t.text, done: !!t.done })),
+      acceptance_criteria: (s.acceptance_criteria || []).map(planItemText),
+      subtasks: (s.subtasks || []).map((t) => (typeof t === 'string' ? { text: t, done: false } : { text: planItemText(t.text), done: !!t.done })),
       priority: s.priority || 'P2', labels: (s.labels || []).slice(),
       status: STATUS_MAP[String(s.status || '').toLowerCase()] || s.status || 'To Do',
       assignee: s.assignee || '',
@@ -54,7 +54,7 @@
   }
   const normCase = (c) => ({
     id: c.id, requirement_ref: c.requirement_ref || c.requirement || '', title: c.title || '',
-    steps: (c.steps || []).slice(), expected: c.expected || '', priority: c.priority || 'P1',
+    steps: (c.steps || []).map(planItemText), expected: planItemText(c.expected), priority: c.priority || 'P1',
   });
   // The model sometimes nests objects inside the plan's list fields; without
   // coercion the UI renders "[object Object]". Normalize to plain strings.
@@ -62,7 +62,7 @@
   const PLAN_LIST_KEYS = ['scope_in', 'scope_out', 'entry_criteria', 'exit_criteria', 'risks'];
   function planItemText(x) {
     if (typeof x === 'string') return x;
-    if (x && typeof x === 'object') return x.text || x.item || x.title || x.name || x.description || JSON.stringify(x);
+    if (x && typeof x === 'object') return x.text || x.item || x.title || x.name || x.description || x.criterion || x.step || JSON.stringify(x);
     return x == null ? '' : String(x);
   }
   function normPlan(p) {

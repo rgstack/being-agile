@@ -603,15 +603,24 @@
   }
 
   // ---------- commit ----------
+  const safeTrim = (x) => String(x == null ? '' : (typeof x === 'object' ? (x.text || x.item || '') : x)).trim();
   function cleanDraft() {
     const D = S.draft;
-    if (D.plan) ['scope_in', 'scope_out', 'entry_criteria', 'exit_criteria', 'risks'].forEach((k) => { D.plan[k] = (D.plan[k] || []).filter((x) => x.trim()); });
-    if (D.stories) D.stories.forEach((s) => { s.acceptance_criteria = s.acceptance_criteria.filter((x) => x.trim()); s.subtasks = s.subtasks.filter((t) => t.text.trim()); });
-    if (D.cases) D.cases.forEach((c) => { c.steps = c.steps.filter((x) => x.trim()); });
+    if (D.plan) ['scope_in', 'scope_out', 'entry_criteria', 'exit_criteria', 'risks'].forEach((k) => { D.plan[k] = (D.plan[k] || []).filter((x) => safeTrim(x)); });
+    if (D.stories) D.stories.forEach((s) => { s.acceptance_criteria = (s.acceptance_criteria || []).filter((x) => safeTrim(x)); s.subtasks = (s.subtasks || []).filter((t) => safeTrim(t && t.text)); });
+    if (D.cases) D.cases.forEach((c) => { c.steps = (c.steps || []).filter((x) => safeTrim(x)); });
   }
   let savedT;
   function saveAll() {
-    cleanDraft(); ui.subEdit = null;
+    try {
+      // Normalize first: the model sometimes returns objects inside list fields;
+      // cleanDraft's trim would throw on those and abort the save.
+      if (S.draft.stories) S.draft.stories = S.draft.stories.map(ST.normStory);
+      if (S.draft.plan) S.draft.plan = ST.normPlan(S.draft.plan);
+      if (S.draft.cases) S.draft.cases = S.draft.cases.map(ST.normCase);
+      cleanDraft();
+    } catch (e) { toast('Save failed: ' + (e && e.message || e)); return; }
+    ui.subEdit = null;
     ['stories', 'plan', 'cases'].forEach((k) => { if (S.draft[k]) S[k] = ST.clone(S.draft[k]); });
     ST.save(); toast('Saved'); ui.justSaved = true; render();
     clearTimeout(savedT); savedT = setTimeout(() => { ui.justSaved = false; chromeSave(); }, 2600);
