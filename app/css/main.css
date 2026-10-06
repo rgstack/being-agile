@@ -129,6 +129,8 @@ a { color: inherit; }
 .main { display: grid; grid-template-rows: var(--top-h) minmax(0, 1fr); min-width: 0; }
 
 .brand { height: var(--top-h); flex: none; display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 16.5px; letter-spacing: -.012em; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.25; }
+.brand-tag { font-size: 11px; font-weight: 450; letter-spacing: .01em; color: var(--ink-3); }
 .brand .marks { display: inline-flex; gap: 3px; }
 .brand .mark { --s: 11px; vertical-align: 0; }
 
