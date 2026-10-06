@@ -1030,4 +1030,4 @@ input[type="checkbox"] { accent-color: var(--ink); width: 15px; height: 15px; ma
 .mm-fail pre code { font: inherit; }
 .cov-map .mm { max-height: 360px; overflow: auto; }
 /* Build version stamp, bottom-left (auto-set from the screens.js ?v= cache-buster) */
-.appver { position: fixed; left: 10px; bottom: 10px; font-size: 10px; font-weight: 600; letter-spacing: .04em; color: var(--ink-2); background: var(--wash); border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; pointer-events: none; z-index: 60; opacity: .92; }
+.appver { align-self: flex-start; margin-top: 12px; font-size: 10px; font-weight: 600; letter-spacing: .04em; color: var(--ink-2); background: var(--wash); border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; opacity: .92; }
