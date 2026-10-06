@@ -8,12 +8,16 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand"><span class="dot"></span>Being Agile<small>PRD to proof</small></div>
-  <nav id="steps" class="steps" aria-label="Steps"></nav>
-  <div class="tools">
-    <span id="meter" class="meter" title="Estimated usage this browser session (dry-run: no real spend)"></span>
-    <button id="btn-reset" class="ghost" title="Clear all saved demo state">Reset demo</button>
-    <button id="btn-gear" class="icon" aria-label="Settings" title="Settings">⚙</button>
+  <div class="top-in">
+    <div class="top-row">
+      <div class="brand"><i class="mark" aria-hidden="true"></i>Being Agile<small>PRD to proof</small></div>
+      <div class="tools">
+        <span id="meter" class="meter" title="Estimated usage this browser session (dry-run: no real spend)"></span>
+        <button id="btn-reset" class="ghost" title="Clear all saved demo state">Reset demo</button>
+        <button id="btn-gear" class="icon" aria-label="Settings" title="Settings">⚙</button>
+      </div>
+    </div>
+    <nav id="steps" class="steps" aria-label="Steps"></nav>
   </div>
 </header>
 
@@ -43,8 +47,9 @@
   <div id="pin-settings"></div>
 </aside>
 
+<aside id="doc-panel" class="doc-panel" hidden aria-label="Document viewer"></aside>
+
 <div id="modal" class="modal" hidden><div class="modal-box" role="dialog" aria-modal="true"></div></div>
-<div id="doc-view" class="modal docview" hidden><div class="modal-box docview-box" role="dialog" aria-modal="true"></div></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="lock" class="lock" hidden></div>
 
@@ -53,6 +58,11 @@
 <script src="js/state.js"></script>
 <script src="js/csv.js"></script>
 <script src="js/pin.js"></script>
+<script src="js/vendor/marked.js"></script>
+<script src="js/vendor/dompurify.js"></script>
+<!-- mermaid via CDN (the 3.4MB vendored copy lives at js/vendor/mermaid.js locally; GitHub's file API can't push files that large, so Pages loads it from CDN and degrades gracefully offline) -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="js/markdown.js"></script>
 <script src="js/screens.js"></script>
 </body>
 </html>
