@@ -690,16 +690,14 @@
     if (!f) return;
     const r = new FileReader();
     r.onload = async () => {
-      const text = String(r.result), cfg = AI.getConfig();
-      let host = cfg.endpoint;
-      try { host = new URL(cfg.endpoint).hostname; } catch (e) { /* keep raw endpoint */ }
+      const text = String(r.result);
+      let host = AI.getConfig().endpoint;
+      try { host = new URL(host).hostname; } catch (e) { /* keep raw endpoint */ }
       const size = f.size >= 1048576 ? (f.size / 1048576).toFixed(1) + ' MB' : f.size >= 1024 ? Math.round(f.size / 1024) + ' KB' : (f.size || 0) + ' bytes';
       const ok = await confirmBox('Upload "' + f.name + '"?',
         '<p>You are about to load <b>' + esc(f.name) + '</b> (' + size + ') into Being Agile.</p>' +
         '<p><b>Check first:</b> make sure this file contains no sensitive information — passwords, API keys, personal or customer data — and that you are authorized to upload it.</p>' +
-        (cfg.dryRun
-          ? '<p class="hint">Dry-run is on: the file stays in this browser and nothing is sent anywhere.</p>'
-          : '<p class="note"><b>Live mode:</b> this document\u2019s text will be sent to <b>' + esc(host) + '</b> when you generate or use AI assist. That goes outside your network.</p>'),
+        '<p class="note"><b>Where it goes:</b> when you generate or use AI assist, your documents are sent to <b>' + esc(host) + '</b> — outside your network.</p>',
         'Upload file');
       if (!ok) return;
       const d = docRef(id); d.name = f.name; d.text = text; ST.save();
