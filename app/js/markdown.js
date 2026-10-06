@@ -63,7 +63,7 @@
       try {
         if (!mermaidOK()) throw new Error('mermaid unavailable');
         if (!inited) {
-          root.mermaid.initialize({ startOnLoad: false, theme: 'base', themeVariables: { primaryColor: '#eef2ff', primaryBorderColor: '#6366f1', primaryTextColor: '#1e1b4b', lineColor: '#6366f1', textColor: '#334155' } });
+          root.mermaid.initialize({ startOnLoad: false, theme: 'base', themeVariables: { primaryColor: '#f1f3f1', primaryBorderColor: '#454f4b', primaryTextColor: '#111816', lineColor: '#69736e', textColor: '#454f4b', fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif' } });
           inited = true;
         }
         const r = await root.mermaid.render(id, code);

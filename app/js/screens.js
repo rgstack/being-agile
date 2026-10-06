@@ -1,30 +1,63 @@
-/* Six screens: rendering + interactions. Event delegation on #app via data-a (click), data-i (input), data-c (change).
+/* Six screens: rendering + interactions. Event delegation on .app / #stage via data-a (click), data-i (input), data-c (change).
+   Shell: sidebar (stages + proof tracker) + top bar + #view + right-hand #sheet (document viewer, story detail).
    Read-only text goes through Markdown (marked -> DOMPurify, mermaid fences painted as diagrams); editing stays raw text in Write tabs. */
 (function () {
   'use strict';
   const AI = window.OpenAI, ST = window.State, CSV = window.CSV, MD = window.Markdown;
   let S = ST.load();
-  const app = document.getElementById('app');
+  const $ = (id) => document.getElementById(id);
+  const shell = document.querySelector('.app'), stage = $('stage'), view = $('view'), sheetEl = $('sheet');
+  const app = stage; // query root for everything rendered into the view or the sheet
   const esc = MD.esc;
   const mi = (t) => MD.inline(t);
   const fmtUsd = (n) => '$' + (n < 0.01 ? n.toFixed(4) : n.toFixed(2));
+  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
   const rows = (s, min) => Math.max(min || 2, Math.min(14, String(s).split('\n').length + 1));
   // write: field path -> true when the Write tab is chosen (Preview is the default); subEdit: "storyId|index" of the subtask being edited
-  const ui = { busy: false, error: '', assist: {}, focus: null, paste: {}, write: {}, subEdit: null, docOpener: null };
+  // sheet: null | 'story' | 'doc'; open/runOpen: expanded report rows / run rows; trace: requirement being traced
+  const ui = { busy: false, error: '', assist: {}, focus: null, paste: {}, write: {}, subEdit: null, docOpener: null, sheet: null, docId: null, docLabel: '', trace: null, open: new Set(), runOpen: new Set(), rfilter: 'all', pfilter: 'all', justSaved: false, scrollTo: null, enter: false, vm: {} };
+
+  // ---------- icons (the design's 16px line set) ----------
+  const I = {
+    x: '<path d="M4 4l8 8M12 4l-8 8"/>', check: '<path d="M3.2 8.4l3.2 3.2 6.4-7.2"/>', plus: '<path d="M8 3.2v9.6M3.2 8h9.6"/>',
+    up: '<path d="M8 12.5v-9M4.2 7.2L8 3.4l3.8 3.8"/>', down: '<path d="M8 3.5v9M4.2 8.8L8 12.6l3.8-3.8"/>',
+    caret: '<path d="M4.2 6.2L8 10l3.8-3.8"/>', right: '<path d="M6 3.8L10.2 8 6 12.2"/>',
+    story: '<path d="M4.2 2.2h7.6a.8.8 0 0 1 .8.8v10.8L8 10.9l-4.6 2.9V3a.8.8 0 0 1 .8-.8z"/>',
+    pencil: '<path d="M10.8 2.8l2.4 2.4-7.4 7.4-3.1.7.7-3.1z"/>',
+    sun: '<circle cx="8" cy="8" r="2.8"/><path d="M8 1.6v1.5M8 12.9v1.5M1.6 8h1.5M12.9 8h1.5M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M4.5 11.5l-1 1"/>',
+    moon: '<path d="M13.2 9.6A5.6 5.6 0 0 1 6.4 2.8a5.6 5.6 0 1 0 6.8 6.8z"/>',
+    print: '<path d="M4.5 5.8V2.5h7v3.3M4.5 11.2H3a1 1 0 0 1-1-1V6.8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3.4a1 1 0 0 1-1 1h-1.5"/><path d="M4.5 9.2h7v4.3h-7z"/>',
+    Highest: '<path d="M4 8.2l4-3.6 4 3.6M4 12l4-3.6 4 3.6"/>', High: '<path d="M4 10l4-3.8 4 3.8"/>', Medium: '<path d="M4 6.2h8M4 9.8h8"/>', Low: '<path d="M4 6l4 3.8L12 6"/>',
+  };
+  const ic = (n, cls) => '<svg class="ic ' + (cls || '') + '" viewBox="0 0 16 16" aria-hidden="true">' + I[n] + '</svg>';
+  const initials = (n) => n.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+
+  // ---------- requirements (the 13 in the bundled NPPES PRD) ----------
+  const REQS = [['REQ-001', 'Direct NPI lookup with check-digit validation'], ['REQ-002', 'Individual provider search (NPI-1)'], ['REQ-003', 'Organization search (NPI-2)'],
+    ['REQ-004', 'Search filters and minimum-criteria guard'], ['REQ-005', 'Paginated results with honest counts'], ['REQ-006', 'Provider detail view'],
+    ['REQ-007', 'Verification against the enrollment record'], ['REQ-008', 'Batch verification'], ['REQ-009', 'Error handling and messaging'],
+    ['REQ-010', 'Caching with visible freshness'], ['REQ-011', 'Upstream protection and resilience'], ['REQ-012', 'Audit trail and evidence snapshots'], ['REQ-013', 'Access control and data handling']];
+  const REQ_NAME = Object.fromEntries(REQS);
+  const VKEY = { PROVEN: 'proven', PARTIAL: 'partial', FAILED: 'failed', 'NOT RUN': 'notrun' };
+  const VLABEL = { proven: 'Proven', partial: 'Partial', failed: 'Failed', notrun: 'Not run' };
+  const RKEY = { PASS: 'pass', FAIL: 'fail', BLOCKED: 'blocked' };
+  const RLABEL = { pass: 'Pass', fail: 'Fail', blocked: 'Blocked', notrun: 'Not run' };
+  const resKey = (id) => { const r = S.results[id]; return r ? RKEY[r.status] : 'notrun'; };
+  const vText = (v, label) => '<span class="verdict" data-v="' + v + '"><span class="t">' + label + '</span></span>';
 
   // ---------- shared UI ----------
   let toastT;
   function toast(msg) {
-    const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
-    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600);
+    const t = $('toast'); t.textContent = msg; t.classList.add('on');
+    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2600);
   }
   function confirmBox(title, bodyHtml, ok) {
     return new Promise((res) => {
-      const m = document.getElementById('modal'), box = m.firstElementChild;
-      box.innerHTML = '<h2>' + esc(title) + '</h2><div style="margin:10px 0 16px">' + bodyHtml + '</div><div class="bar"><button class="ghost" data-r="0">Cancel</button><button class="primary" data-r="1">' + esc(ok || 'Confirm') + '</button></div>';
+      const m = $('modal'), box = m.firstElementChild;
+      box.innerHTML = '<h2>' + esc(title) + '</h2><div style="margin:12px 0 18px">' + bodyHtml + '</div><div class="mbar"><button class="btn btn-q" data-r="0">Cancel</button><button class="btn" data-r="1">' + esc(ok || 'Confirm') + '</button></div>';
       m.hidden = false;
       box.onclick = (e) => { const r = e.target.closest('[data-r]'); if (r) { m.hidden = true; res(r.dataset.r === '1'); } };
-      box.querySelector('.primary').focus();
+      box.querySelector('[data-r="1"]').focus();
     });
   }
   const KINDS = [['stories', 'Stories'], ['plan', 'Test plan'], ['cases', 'Test cases']];
@@ -50,33 +83,109 @@
     ui.busy = false; render();
   }
 
-  // ---------- chrome ----------
+  // ---------- requirement model (shared by coverage strip + report + proof tracker) ----------
+  function reqModel(stories, cases) {
+    const reqs = {}, add = (r) => (reqs[r] = reqs[r] || { id: r, stories: [], cases: [] });
+    const reqsOf = (labels) => labels.filter((l) => /^REQ-/i.test(l));
+    stories.forEach((s) => reqsOf(s.labels).forEach((l) => add(l.toUpperCase()).stories.push(s)));
+    cases.forEach((c) => String(c.requirement_ref).split(/[,\s]+/).filter(Boolean).forEach((r) => add(r.toUpperCase()).cases.push(c)));
+    return Object.values(reqs).sort((a, b) => a.id.localeCompare(b.id)).map((r) => Object.assign(r, { verdict: ST.verdict(r.cases) }));
+  }
+  // every bundled requirement appears even when nothing links to it yet (NOT RUN)
+  function reportModel() {
+    const by = {};
+    reqModel(S.stories, S.cases).forEach((r) => (by[r.id] = r));
+    REQS.forEach(([id]) => { if (!by[id]) by[id] = { id, stories: [], cases: [], verdict: 'NOT RUN' }; });
+    return Object.values(by).sort((a, b) => a.id.localeCompare(b.id));
+  }
+  const reqName = (r) => REQ_NAME[r.id] || r.id;
+  const reqNameHtml = (r) => (REQ_NAME[r.id] ? esc(REQ_NAME[r.id]) : r.stories[0] ? mi(r.stories[0].title) : esc(r.id));
+  const reqChip = (id) => '<span class="req" title="' + esc(REQ_NAME[id] || id) + '"><i class="mark" data-v="' + (ui.vm[id.toUpperCase()] || 'notrun') + '"></i>' + esc(id) + '</span>';
+  const reqChips = (ids) => ids.map(reqChip).join('');
+
+  // ---------- chrome: sidebar stages, proof tracker, top bar ----------
+  const nav = $('steps');
+  nav.innerHTML = '<span class="pip" aria-hidden="true"></span>' + ST.STEPS.map((n, i) =>
+    '<button class="stage-link" data-step="' + i + '"><span class="n">' + (i + 1) + '</span><span class="l">' + n + '</span><span class="m"></span></button>').join('');
+  let reqKey = '';
+  function buildReqUI(ids) {
+    const key = ids.join(',');
+    if (key === reqKey) return;
+    reqKey = key;
+    const btn = (id, k, cls) => '<button data-a="trace" data-k="' + id + '" aria-pressed="false" title="' + esc(id + (REQ_NAME[id] ? ' · ' + REQ_NAME[id] : '')) + '" aria-label="' + esc(id + (REQ_NAME[id] ? ', ' + REQ_NAME[id] : '')) + '"><i class="mark" data-reqmark="' + id + '" style="--k:' + k + '"></i></button>';
+    $('proof').innerHTML = '<div class="proof-h"><span>Proof so far</span><span>' + ids.length + ' requirements</span></div><div class="proof-row" role="group" aria-label="Requirements">' + ids.map((id, k) => btn(id, k)).join('') + '</div><div class="proof-c" id="proofc"></div>';
+    $('top-marks').innerHTML = ids.map((id, k) => btn(id, k)).join('');
+  }
+  function marks() {
+    document.querySelectorAll('[data-reqmark]').forEach((m) => {
+      const v = ui.vm[m.dataset.reqmark] || 'notrun';
+      if (m.dataset.v && m.dataset.v !== v) { m.classList.remove('bump'); void m.offsetWidth; m.classList.add('bump'); }
+      m.dataset.v = v;
+    });
+    document.querySelectorAll('.proof-row button, .top-marks button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.k === ui.trace)));
+  }
+  function chromeSave() {
+    const n = dirtyKinds().length, st = $('savestate'), b = $('saveall');
+    st.className = 'save-state' + (n ? ' dirty' : ui.justSaved ? ' done' : '');
+    st.textContent = n ? 'Unsaved changes' : ui.justSaved ? 'Saved just now' : 'All changes saved';
+    b.disabled = !n;
+    b.innerHTML = n ? 'Save all<span class="count">' + n + '</span>' : 'Save all';
+    b.title = n ? 'Unsaved: ' + dirtyKinds().map((k) => k[1]).join(', ') : 'Nothing to save';
+  }
   function renderChrome() {
-    document.getElementById('steps').innerHTML = ST.STEPS.map((n, i) =>
-      '<button data-step="' + i + '" class="' + (S.step === i ? 'cur' : i < S.step ? 'done' : '') + '"' + (S.step === i ? ' aria-current="step"' : '') + (ST.unlocked(i) ? '' : ' disabled title="Complete the previous step first"') + '><span class="n">' + (i + 1) + '</span><span class="t">' + n + '</span></button>').join('');
+    const model = reportModel(), tally = { proven: 0, partial: 0, failed: 0, notrun: 0 };
+    ui.vm = {};
+    model.forEach((r) => { ui.vm[r.id] = VKEY[r.verdict]; tally[VKEY[r.verdict]]++; });
+    const c = counts(), nCases = S.cases.length;
+    const planN = S.plan ? Object.keys(PLAN_LABELS).filter((k) => (Array.isArray(S.plan[k]) ? S.plan[k].length : String(S.plan[k] || '').trim())).length : 0;
+    const d = S.docs, nDocs = [d.prd, d.design, d.api].concat(d.extras).filter((x) => x.text.trim()).length;
+    const meta = [nDocs ? plural(nDocs, 'document') : 'No documents yet', S.stories.length ? plural(S.stories.length, 'story', 'stories') : 'No stories yet', S.plan ? plural(planN, 'section') : 'No plan yet',
+      nCases ? plural(nCases, 'case') : 'No cases yet', nCases ? (nCases - c['NOT RUN']) + ' of ' + nCases + ' run' : 'Nothing to run', tally.proven + ' of ' + model.length + ' proven'];
+    nav.style.setProperty('--i', S.step);
+    nav.querySelectorAll('.stage-link').forEach((b, i) => {
+      if (i === S.step) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+      const ok = ST.unlocked(i);
+      b.disabled = !ok; b.title = ok ? '' : 'Review gate: complete the previous stage first';
+      b.querySelector('.m').textContent = meta[i];
+    });
+    const act = nav.querySelectorAll('.stage-link')[S.step];
+    if (act && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = act.offsetLeft - (nav.clientWidth - act.offsetWidth) / 2;
+    buildReqUI(model.map((r) => r.id));
+    marks();
+    $('proofc').textContent = ['proven', 'partial', 'failed', 'notrun'].filter((k) => tally[k]).map((k) => tally[k] + ' ' + VLABEL[k].toLowerCase()).join(', ');
+    const r = ui.trace && model.find((x) => x.id === ui.trace);
+    $('traceslot').innerHTML = r ? '<button class="trace" data-a="trace-clear" aria-label="Stop tracing ' + esc(r.id) + '"><i class="mark" data-reqmark="' + esc(r.id) + '" data-v="' + VKEY[r.verdict] + '"></i><b>Tracing ' + esc(r.id) + '</b><span class="tn">' + esc(reqName(r)) + '</span><span class="x">' + ic('x') + '</span></button>' : '';
+    chromeSave();
     const u = AI.getUsage().total;
-    document.getElementById('meter').textContent = (u.prompt_tokens + u.completion_tokens).toLocaleString() + ' tok · ~' + fmtUsd(u.est_usd) + (AI.getConfig().dryRun ? ' · dry-run' : ' · live');
+    $('meter').textContent = (u.prompt_tokens + u.completion_tokens).toLocaleString() + ' tok · ~' + fmtUsd(u.est_usd) + (AI.getConfig().dryRun ? ' · dry-run' : ' · live');
     const calls = AI.getUsage().calls;
-    document.getElementById('usage').innerHTML = calls.length
-      ? '<table class="u-tbl"><tr><th>Call</th><th>Model</th><th>In</th><th>Out</th><th>$</th></tr>' + calls.map((c) =>
-        '<tr><td>' + c.operation + '</td><td>' + c.model + '</td><td>' + c.prompt_tokens.toLocaleString() + '</td><td>' + c.completion_tokens.toLocaleString() + '</td><td>' + fmtUsd(c.est_usd) + '</td></tr>').join('') +
+    $('usage').innerHTML = calls.length
+      ? '<table class="u-tbl"><tr><th>Call</th><th>Model</th><th>In</th><th>Out</th><th>$</th></tr>' + calls.map((x) =>
+        '<tr><td>' + x.operation + '</td><td>' + x.model + '</td><td>' + x.prompt_tokens.toLocaleString() + '</td><td>' + x.completion_tokens.toLocaleString() + '</td><td>' + fmtUsd(x.est_usd) + '</td></tr>').join('') +
       '<tr><th>Total</th><th></th><th>' + u.prompt_tokens.toLocaleString() + '</th><th>' + u.completion_tokens.toLocaleString() + '</th><th>' + fmtUsd(u.est_usd) + '</th></tr></table>'
       : '<p class="hint">No calls yet.</p>';
   }
-  const head = (title, lede, tools) => '<div class="pagehead"><div class="tx"><h1>' + title + '</h1><p class="lede">' + lede + '</p></div>' + (tools ? '<div class="ph-tools">' + tools + '</div>' : '') + '</div>';
+
+  // ---------- page furniture ----------
+  const head = (title, lede, tools) => '<h1 class="title">' + title + '</h1><p class="lede">' + lede + '</p>' + (tools ? '<div class="bar">' + tools + '</div>' : '');
   const errBox = () => (ui.error ? '<div class="err" role="alert">' + esc(ui.error) + '</div>' : '');
-  const NEXT = { 1: ['Test plan', 2], 2: ['Test cases', 3], 3: ['Run', 4] };
-  // sticky save bar (Stories / Test plan / Test cases): dirty state, Save all, next step
-  function barInner() {
-    const ks = dirtyKinds(), nx = NEXT[S.step], mac = /Mac|iPhone|iPad/.test(navigator.platform || '');
-    return '<div class="bar-msg ' + (ks.length ? 'warn' : 'ok') + '">' + (ks.length ? '<span class="pip"></span>Unsaved changes in ' + ks.map((k) => k[1]).join(', ') + '. Run and Report use the last saved version.' : '✓ All changes saved') + '</div>' +
-      (ks.length ? '<span class="kbd" title="Save with the keyboard"><kbd>' + (mac ? '⌘' : 'Ctrl') + '</kbd> <kbd>S</kbd></span>' : '') +
-      '<button class="primary" data-a="save-all"' + (ks.length ? '' : ' disabled') + '>Save all</button>' +
-      (nx ? '<button class="ghost" data-a="go" data-k="' + nx[1] + '"' + (ST.unlocked(nx[1]) ? '' : ' disabled title="Save first to unlock the next step"') + '>' + nx[0] + ' →</button>' : '');
+  const NEXT = { 0: ['stories', 1], 1: ['the test plan', 2], 2: ['test cases', 3], 3: ['the run', 4], 4: ['the report', 5] };
+  const nextBtn = (step) => { const nx = NEXT[step]; return nx ? '<button class="btn' + (step === 0 ? ' btn-q' : '') + '" data-a="go" data-k="' + nx[1] + '"' + (ST.unlocked(nx[1]) ? '' : ' disabled title="Review gate: save the previous stage first"') + '>Continue to ' + nx[0] + '</button>' : ''; };
+  // next-step row at the foot of every screen; on Stories / Test plan / Test cases it carries the unsaved-changes hint
+  function nextInner() {
+    const ks = dirtyKinds(), mac = /Mac|iPhone|iPad/.test(navigator.platform || '');
+    let h = '';
+    if (S.step === 0) {
+      const d = S.docs, has = [d.prd, d.design, d.api].concat(d.extras).some((x) => x.text.trim());
+      h = '<button class="btn" data-a="gen-stories"' + (has && !ui.busy ? '' : ' disabled') + '>' + (ui.busy ? 'Generating…' : 'Generate stories') + '</button>' + (S.stories.length ? nextBtn(0) : '');
+    } else h = nextBtn(S.step);
+    if (S.step >= 1 && S.step <= 3 && ks.length) h += '<span class="hint">Unsaved changes in ' + ks.map((k) => k[1]).join(', ') + '. Run and Report use the last saved version. <span class="kbd">' + (mac ? '⌘' : 'Ctrl') + '</span><span class="kbd">S</span> saves.</span>';
+    return h;
   }
-  const saveBar = () => '<div class="savebar" id="bar"><div class="bar-in">' + barInner() + '</div></div>';
-  const csvBtn = (a) => '<button class="ghost" data-a="' + a + '">Export CSV</button>';
-  const genBtn = (exists, act, first) => '<button class="' + (exists ? 'ghost' : 'primary') + '" data-a="' + act + '"' + (ui.busy ? ' disabled' : '') + '>' + (ui.busy ? 'Generating…' : (exists ? 'Regenerate' : first)) + '</button>';
+  const nextRow = () => '<div class="next" id="next">' + nextInner() + '</div>';
+  const csvBtn = (a) => '<button class="btn btn-q btn-s" data-a="' + a + '">Export CSV</button>';
+  const genBtn = (exists, act, first) => '<button class="btn' + (exists ? ' btn-q btn-s' : '') + '" data-a="' + act + '"' + (ui.busy ? ' disabled' : '') + '>' + (ui.busy ? 'Generating…' : (exists ? 'Regenerate' : first)) + '</button>';
+  const tabs = (act, cur, items) => '<div class="tabs" role="tablist">' + items.map(([v, l, c]) => '<button class="tab" role="tab" aria-selected="' + (v === cur) + '" data-a="' + act + '" data-k="' + v + '">' + l + (c === undefined ? '' : '<span class="c">' + c + '</span>') + '</button>').join('') + '</div>';
 
   // ---------- markdown Write / Preview tabs ----------
   // fmt: 'ac' = one item per line -> checklist; 'steps' = one per line -> numbered list; '' = plain markdown
@@ -84,16 +193,16 @@
   const previewHtml = (v, fmt) => (fmt === 'ac' ? MD.render(v, { list: true }) : MD.render(fmt === 'steps' ? numbered(v) : v));
   function rt(path, value, fmt, min) {
     const w = !!ui.write[path], p = esc(path), tab = (t, label, on) => '<button type="button" role="tab" data-a="rt-tab" data-k="' + p + '" data-t="' + t + '" aria-selected="' + on + '">' + label + '</button>';
-    return '<div class="rt" data-fmt="' + (fmt || '') + '"><div class="rt-tabs" role="tablist">' + tab('write', 'Write', w) + tab('preview', 'Preview', !w) + '</div>' +
+    return '<div class="rt" data-fmt="' + (fmt || '') + '"><div class="rt-tabs" role="tablist">' + tab('preview', 'Preview', !w) + tab('write', 'Write', w) + '</div>' +
       '<div class="rt-write" role="tabpanel"' + (w ? '' : ' hidden') + '><textarea data-i="rt" data-k="' + p + '" rows="' + rows(value, min || 3) + '" spellcheck="false" placeholder="Markdown supported">' + esc(value) + '</textarea></div>' +
-      '<div class="rt-prev doc" role="tabpanel"' + (w ? ' hidden' : '') + '></div></div>';
+      '<div class="rt-prev md prose" role="tabpanel"' + (w ? ' hidden' : '') + '></div></div>';
   }
   function grow(t) { t.style.height = 'auto'; t.style.height = (t.scrollHeight + 2) + 'px'; }
   const paintPrev = (box) => { const v = box.querySelector('.rt-prev'); if (v && !v.hidden) v.innerHTML = previewHtml(box.querySelector('textarea').value, box.dataset.fmt); };
   // fill every visible Preview pane under root from its textarea, size visible textareas, then paint diagrams
   function hydrate(root) {
     root.querySelectorAll('.rt').forEach(paintPrev);
-    root.querySelectorAll('.rt-write:not([hidden]) textarea').forEach(grow);
+    root.querySelectorAll('.rt-write:not([hidden]) textarea, textarea.story-title, textarea.run-in').forEach(grow);
     MD.paintMermaid(root);
   }
   function setRT(path, v) {
@@ -104,139 +213,165 @@
   }
   const clearCaseTabs = () => Object.keys(ui.write).forEach((k) => { if (k.indexOf('case|') === 0) delete ui.write[k]; });
 
+  // ---------- the sheet (right-hand detail panel) ----------
+  function closeSheet() {
+    if (!ui.sheet) return;
+    const was = ui.sheet, opener = ui.docOpener;
+    ui.sheet = null; ui.docOpener = null; ui.subEdit = null;
+    stage.classList.remove('open'); delete stage.dataset.sheet;
+    if (was === 'doc') { const o = opener && view.querySelector('button[data-a="open-doc"][data-k="' + opener + '"]'); if (o) o.focus(); }
+    else { const o = view.querySelector('.card[data-k="' + (S.sel || '') + '"]'); if (o) o.focus(); }
+    view.querySelectorAll('.doc.on').forEach((r) => r.classList.remove('on'));
+    view.querySelectorAll('.card[aria-current="true"]').forEach((r) => r.setAttribute('aria-current', 'false'));
+  }
+  function sheetDoc(d, label) {
+    return '<div class="sheet-head"><span class="sheet-kicker">' + esc(label) + '</span><span class="sheet-file">' + esc(d.name || label) + '</span><span class="sp"></span>' +
+      '<button class="icon-btn" data-a="sheet-close" aria-label="Close">' + ic('x') + '</button><span class="sheet-prog" aria-hidden="true"></span></div>' +
+      '<div class="sheet-body"><article class="md doc-md sheet-swap">' + MD.render(d.text || '') + '</article></div>';
+  }
+  function openDocSheet(d, label, id) {
+    ui.sheet = 'doc'; ui.docId = id; ui.docLabel = label; ui.docOpener = id; ui.subEdit = null;
+    sheetEl.innerHTML = sheetDoc(d, label); sheetEl.setAttribute('aria-label', label);
+    stage.dataset.sheet = 'doc'; stage.classList.add('open');
+    MD.paintMermaid(sheetEl);
+    view.querySelectorAll('.doc').forEach((r) => r.classList.toggle('on', r.dataset.doc === id));
+    sheetEl.querySelector('[data-a="sheet-close"]').focus();
+  }
+  function paintSheet(keepTop) {
+    if (ui.sheet === 'story' && (S.step !== 1 || !curStory())) ui.sheet = null;
+    if (ui.sheet === 'doc' && S.step !== 0) ui.sheet = null;
+    if (ui.sheet === 'story') {
+      sheetEl.innerHTML = sheetStory(curStory()); sheetEl.setAttribute('aria-label', 'Story detail');
+      stage.dataset.sheet = 'story'; stage.classList.add('open');
+      const b = sheetEl.querySelector('.sheet-body'); if (b && keepTop) b.scrollTop = keepTop;
+      hydrate(sheetEl);
+    } else if (ui.sheet !== 'doc') { stage.classList.remove('open'); delete stage.dataset.sheet; }
+  }
+  sheetEl.addEventListener('scroll', (e) => {
+    const b = e.target; if (!b.classList || !b.classList.contains('sheet-body')) return;
+    const p = sheetEl.querySelector('.sheet-prog'); if (p) p.style.setProperty('--p', b.scrollTop / Math.max(1, b.scrollHeight - b.clientHeight));
+  }, true);
+
   // ---------- 1. Start ----------
-  const FILE_ICON = '<svg class="ficon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>';
   const docId = (key, extraIdx) => (extraIdx == null ? key : 'x' + extraIdx);
   function docRow(key, label, d, extraIdx) {
     const id = docId(key, extraIdx), has = !!d.text.trim();
-    const browse = '<label class="browse">' + (has ? 'Replace' : 'Browse') + '<input type="file" accept=".md,.txt,text/*" data-c="file" data-k="' + id + '"></label>';
-    return '<div class="docrow' + (has ? ' loaded' : '') + '" data-doc="' + id + '" data-drop="' + id + '"><div class="docrow-main">' + FILE_ICON + '<span class="docrow-label">' + esc(label) + '</span>' +
-      (has
-        ? '<span class="docrow-name" title="' + esc(d.name || label) + '">' + esc(d.name || label) + '</span><button class="sm" data-a="open-doc" data-k="' + id + '" data-label="' + esc(label) + '">View</button>' + browse
-        : '<span class="docrow-empty">No document</span>' + browse + '<button class="link" data-a="toggle-paste" data-k="' + id + '">Paste</button>') +
-      (extraIdx != null ? '<button class="sm" data-a="rm-extra" data-k="' + extraIdx + '">Remove</button>' : '') + '</div>' +
-      (ui.paste[id] ? '<textarea data-i="doc" data-k="' + id + '" placeholder="Paste text here" spellcheck="false" rows="6">' + esc(d.text) + '</textarea>' : '') + '</div>';
+    const browse = '<label class="link browse">' + (has ? 'Replace' : 'Browse') + '<input type="file" class="vh" accept=".md,.txt,text/*" data-c="file" data-k="' + id + '"></label>';
+    return '<li class="doc' + (has ? '' : ' empty') + (ui.paste[id] ? ' has-paste' : '') + (ui.sheet === 'doc' && ui.docId === id ? ' on' : '') + '" data-doc="' + id + '" data-drop="' + id + '"' + (has ? ' data-a="open-doc" data-k="' + id + '" data-label="' + esc(label) + '"' : '') + '>' +
+      '<span class="doc-label">' + esc(label) + '</span>' +
+      (has ? '<span class="doc-file" title="' + esc(d.name || label) + '">' + esc(d.name || label) + '</span>' : '<span class="doc-file doc-empty">No document</span>') +
+      '<span class="doc-act">' +
+      (has ? '<button class="btn btn-q btn-s" data-a="open-doc" data-k="' + id + '" data-label="' + esc(label) + '" aria-label="View ' + esc(label) + '">View</button>' + browse
+        : browse + '<button class="link" data-a="toggle-paste" data-k="' + id + '">Paste</button>') +
+      (extraIdx != null ? '<button class="link" data-a="rm-extra" data-k="' + extraIdx + '">Remove</button>' : '') + '</span>' +
+      (ui.paste[id] ? '<div class="doc-paste"><textarea class="in" data-i="doc" data-k="' + id + '" placeholder="Paste text here" spellcheck="false" rows="6">' + esc(d.text) + '</textarea></div>' : '') + '</li>';
   }
   const docRef = (id) => (id[0] === 'x' ? S.docs.extras[+id.slice(1)] : S.docs[id]);
-  const docPanel = () => document.getElementById('doc-panel');
-  function openDocPanel(d, label, opener) {
-    const p = docPanel();
-    p.innerHTML = '<div class="doc-panel-head"><h2>' + esc(d.name || label) + '</h2><button class="sm" data-a="close-doc">Close</button></div><div class="doc-body doc">' + MD.render(d.text || '') + '</div>';
-    p.hidden = false; p.scrollTop = 0; ui.docOpener = opener || null;
-    MD.paintMermaid(p);
-    p.querySelector('[data-a="close-doc"]').focus();
-  }
-  function closeDocPanel() {
-    const p = docPanel(); if (p.hidden) return;
-    p.hidden = true; p.innerHTML = '';
-    const o = ui.docOpener && app.querySelector('[data-a="open-doc"][data-k="' + ui.docOpener + '"]'); ui.docOpener = null;
-    if (o) o.focus();
-  }
-  docPanel().addEventListener('click', (e) => { if (e.target.closest('[data-a="close-doc"]')) closeDocPanel(); });
   function renderStart() {
-    const d = S.docs, has = [d.prd, d.design, d.api].concat(d.extras).some((x) => x.text.trim());
-    const dry = AI.getConfig().dryRun;
+    const d = S.docs, dry = AI.getConfig().dryRun;
     return head('Start with your source documents', dry
       ? 'Add the PRD, design doc and API spec (plus any supporting docs). Nothing leaves your browser in Phase 1 — generation is simulated (dry-run).'
       : 'Add the PRD, design doc and API spec (plus any supporting docs). <b>Live mode:</b> calls OpenAI with your key. Sample docs are condensed to control cost — full text in dry-run.') +
-      '<div class="doclist">' + docRow('prd', 'PRD', d.prd) + docRow('design', 'Design doc', d.design) + docRow('api', 'API spec', d.api) +
-      d.extras.map((x, i) => docRow('x', 'Supporting doc ' + (i + 1), x, i)).join('') + '</div>' +
-      '<div class="bar"><button class="ghost" data-a="add-extra">+ Add another document</button><button class="ghost" data-a="load-sample">Load NPPES sample</button><span class="grow"></span>' +
-      '<button class="primary" data-a="gen-stories"' + (has && !ui.busy ? '' : ' disabled') + '>' + (ui.busy ? 'Generating…' : 'Generate stories →') + '</button></div>' + errBox() +
+      '<ul class="docs">' + docRow('prd', 'PRD', d.prd) + docRow('design', 'Design doc', d.design) + docRow('api', 'API spec', d.api) + '</ul>' +
+      (d.extras.length ? '<h2 class="group">Supporting documents</h2><ul class="docs">' + d.extras.map((x, i) => docRow('x', 'Supporting doc ' + (i + 1), x, i)).join('') + '</ul>' : '') +
+      '<div class="bar" style="margin-top:14px"><button class="add-doc" data-a="add-extra" style="margin-top:0">' + ic('plus') + 'Add another document</button><span class="sp"></span><button class="btn btn-q btn-s" data-a="load-sample">Load NPPES sample</button></div>' +
+      errBox() + nextRow() +
       '<p class="how"><b>How this works.</b> AI drafts → you edit → you save. Drop a file on any row, browse for one, or paste text.</p>';
   }
 
   // ---------- 2. Stories ----------
   const PRIOS = ['P0', 'P1', 'P2', 'P3'], STATUSES = ['To Do', 'In Progress', 'Done'];
-  const prioCls = (p) => (p === 'P0' ? 'p0' : p === 'P1' ? 'p1' : '');
+  const PRIO_ICON = { P0: 'Highest', P1: 'High', P2: 'Medium', P3: 'Low' };
+  const prio = (p) => '<span class="prio">' + (PRIO_ICON[p] ? ic(PRIO_ICON[p]) : '') + esc(p) + '</span>';
+  const statusChip = (s) => '<span class="status" data-s="' + esc(s) + '"><i></i>' + esc(s) + '</span>';
   const curStory = () => (S.draft.stories || []).find((s) => s.id === S.sel);
   const reqsOf = (labels) => labels.filter((l) => /^REQ-/i.test(l));
-  const reqTags = (r) => r.map((x) => '<span class="tag">' + esc(x) + '</span>').join('');
   const storyEdited = (s) => { const v = S.stories.find((x) => x.id === s.id); return !v || JSON.stringify(v) !== JSON.stringify(s); };
-  const stateTag = (edited) => '<span class="state ' + (edited ? 'edited' : 'ok') + '">' + (edited ? 'Edited' : 'Saved') + '</span>';
   const catKind = (l) => (/^phase-/i.test(l) ? 'phase' : /^REQ-/i.test(l) ? 'req' : 'area');
   function catsHtml(labels) {
-    if (!labels.length) return '<span class="cat-l">Category</span><span class="hint">No labels</span>';
+    if (!labels.length) return '<span class="hint">No labels</span>';
     const order = { phase: 0, area: 1, req: 2 };
-    return '<span class="cat-l">Category</span>' + labels.slice().sort((a, b) => order[catKind(a)] - order[catKind(b)]).map((l) => '<span class="cat ' + catKind(l) + '">' + esc(l) + '</span>').join('');
+    return labels.slice().sort((a, b) => order[catKind(a)] - order[catKind(b)]).map((l) => (catKind(l) === 'req' ? reqChip(l.toUpperCase()) : '<span class="label">' + esc(l) + '</span>')).join('');
   }
   function assistBox(sec) {
     const a = ui.assist[sec] || {};
-    return '<div class="assist" ' + (a.open ? '' : 'hidden') + '><div class="revise"><input data-i="assist-prompt" data-k="' + sec + '" placeholder="Ask AI to improve this…" aria-label="Ask AI to improve ' + sec + '" value="' + esc(a.prompt || '') + '"><button class="sm" data-a="assist" data-k="' + sec + '">Ask</button></div>' +
-      (a.out ? '<div class="out doc">' + MD.render(a.out) + '</div>' : '') + '</div>';
+    return '<div class="assist" ' + (a.open ? '' : 'hidden') + '><div class="ai-box"><span class="ai-tag">AI</span><input data-i="assist-prompt" data-k="' + sec + '" placeholder="Ask AI to improve this…" aria-label="Ask AI to improve ' + sec + '" value="' + esc(a.prompt || '') + '"><button class="ai-go" data-a="assist" data-k="' + sec + '">Ask</button></div>' +
+      (a.out ? '<div class="ai-prop"><div class="body md">' + MD.render(a.out) + '</div></div>' : '') + '</div>';
   }
-  const aiLink = (sec) => '<button class="sm ai" data-a="assist-toggle" data-k="' + sec + '">✨ AI assist</button>';
+  const aiLink = (sec) => '<button class="ai-link" data-a="assist-toggle" data-k="' + sec + '" aria-expanded="' + !!(ui.assist[sec] || {}).open + '">AI assist</button>';
   function subRow(t, i, sid) {
     if (ui.subEdit === sid + '|' + i) {
-      return '<div class="sub edit"><input type="text" data-i="st-edit" data-k="' + i + '" value="' + esc(t.text) + '" aria-label="Edit subtask" placeholder="Subtask, markdown allowed"><button class="sm primary" data-a="st-save" data-k="' + i + '">Save</button><button class="sm" data-a="st-cancel" data-k="' + i + '">Cancel</button></div>';
+      return '<li class="edit"><input type="text" class="in" data-i="st-edit" data-k="' + i + '" value="' + esc(t.text) + '" aria-label="Edit subtask" placeholder="Subtask, markdown allowed"><button class="btn btn-s" data-a="st-save" data-k="' + i + '">Save</button><button class="btn btn-q btn-s" data-a="st-cancel" data-k="' + i + '">Cancel</button></li>';
     }
-    return '<div class="sub' + (t.done ? ' done' : '') + '"><input type="checkbox" data-c="st-done" data-k="' + i + '" aria-label="Done"' + (t.done ? ' checked' : '') + '>' +
+    return '<li class="' + (t.done ? 'done' : '') + '"><button class="check" role="checkbox" aria-checked="' + !!t.done + '" data-a="st-done" data-k="' + i + '" aria-label="Done">' + ic('check') + '</button>' +
       '<div class="sub-t">' + (t.text.trim() ? mi(t.text) : '<span class="hint">Empty subtask</span>') + '</div>' +
-      '<button class="ib" data-a="st-pencil" data-k="' + i + '" aria-label="Edit subtask" title="Edit">✎</button><button class="ib" data-a="st-rm" data-k="' + i + '" aria-label="Remove subtask" title="Remove">×</button></div>';
+      '<span class="sub-acts"><button class="row-x" data-a="st-pencil" data-k="' + i + '" aria-label="Edit subtask" title="Edit">' + ic('pencil') + '</button><button class="row-x" data-a="st-rm" data-k="' + i + '" aria-label="Remove subtask" title="Remove">' + ic('x') + '</button></span></li>';
   }
-  function renderPanel() {
-    const s = curStory();
-    if (!s) return '<aside class="card panel empty">Select a story.</aside>';
+  function footStory(s) {
+    return '<span class="prov">' + (storyEdited(s) ? 'Edited. Not saved yet: Run and Report use the saved version.' : '<span class="ok-t">Saved</span> · this is the version Run and Report use') + '</span>';
+  }
+  function sheetStory(s) {
     const sp = 's|' + s.id + '|', nDone = s.subtasks.filter((t) => t.done).length;
-    return '<aside class="panel" aria-label="Story detail"><div class="panel-h"><span class="id">' + esc(s.id) + '</span>' + reqTags(reqsOf(s.labels)) + stateTag(storyEdited(s)) + '</div><div class="panel-b">' +
-      '<div class="cats" aria-label="Category">' + catsHtml(s.labels) + '</div>' +
-      '<input type="text" class="title-in" data-i="s-title" value="' + esc(s.title) + '" aria-label="Summary">' +
-      '<div class="fields"><div><label class="l">Status</label><select data-c="s-status" aria-label="Status">' + STATUSES.map((x) => '<option' + (x === s.status ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></div>' +
-      '<div><label class="l">Priority</label><select data-c="s-priority" aria-label="Priority">' + PRIOS.map((x) => '<option' + (x === s.priority ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></div>' +
-      '<div><label class="l">Assignee</label><input type="text" data-i="s-assignee" value="' + esc(s.assignee) + '" placeholder="Unassigned" aria-label="Assignee"></div>' +
-      '<div><label class="l">Labels</label><input type="text" data-i="s-labels" value="' + esc(s.labels.join(', ')) + '" placeholder="comma-separated" aria-label="Labels"></div></div>' +
-      '<div class="lbl-row"><label class="l">Description</label>' + aiLink('description') + '</div>' + assistBox('description') + rt(sp + 'desc', s.description, '', 5) +
-      '<div class="lbl-row"><label class="l">Acceptance criteria · one per line</label>' + aiLink('acceptance criteria') + '</div>' + assistBox('acceptance criteria') + rt(sp + 'ac', s.acceptance_criteria.join('\n'), 'ac', 4) +
-      '<div class="lbl-row"><label class="l">Subtasks · ' + nDone + '/' + s.subtasks.length + ' done</label>' + aiLink('subtasks') + '</div>' + assistBox('subtasks') +
-      s.subtasks.map((t, i) => subRow(t, i, s.id)).join('') +
-      '<button class="sm addsub" data-a="st-add">+ Add subtask</button></div></aside>';
+    return '<div class="sheet-head"><span class="card-k"><span class="key">' + ic('story') + esc(s.id) + '</span></span><span class="sp"></span>' +
+      '<button class="icon-btn" data-a="story-step" data-k="-1" aria-label="Previous story">' + ic('up') + '</button><button class="icon-btn" data-a="story-step" data-k="1" aria-label="Next story">' + ic('down') + '</button>' +
+      '<button class="icon-btn" data-a="sheet-close" aria-label="Close">' + ic('x') + '</button></div>' +
+      '<div class="sheet-body"><div class="story sheet-swap">' +
+      '<textarea class="story-title ed-in" rows="1" spellcheck="false" data-i="s-title" aria-label="Summary">' + esc(s.title) + '</textarea>' +
+      '<dl class="fields"><div><dt>Status</dt><dd><select class="in" data-c="s-status" aria-label="Status">' + STATUSES.map((x) => '<option' + (x === s.status ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></dd></div>' +
+      '<div><dt>Priority</dt><dd><select class="in" data-c="s-priority" aria-label="Priority">' + PRIOS.map((x) => '<option' + (x === s.priority ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></dd></div>' +
+      '<div class="wide"><dt>Assignee</dt><dd><input type="text" class="in" data-i="s-assignee" value="' + esc(s.assignee) + '" placeholder="Unassigned" aria-label="Assignee"></dd></div>' +
+      '<div class="wide"><dt>Labels</dt><dd><input type="text" class="in" data-i="s-labels" value="' + esc(s.labels.join(', ')) + '" placeholder="comma-separated" aria-label="Labels"><div class="cats" id="cats" aria-label="Category">' + catsHtml(s.labels) + '</div></dd></div></dl>' +
+      '<section class="sec"><div class="lbl-row"><h3>Description</h3>' + aiLink('description') + '</div>' + assistBox('description') + rt(sp + 'desc', s.description, '', 5) + '</section>' +
+      '<section class="sec"><div class="lbl-row"><h3>Acceptance criteria<span class="n">one per line</span></h3>' + aiLink('acceptance criteria') + '</div>' + assistBox('acceptance criteria') + rt(sp + 'ac', s.acceptance_criteria.join('\n'), 'ac', 4) + '</section>' +
+      '<section class="sec"><div class="lbl-row"><h3>Subtasks<span class="n">' + nDone + ' of ' + s.subtasks.length + ' done</span></h3>' + aiLink('subtasks') + '</div>' + assistBox('subtasks') +
+      '<ul class="subs">' + s.subtasks.map((t, i) => subRow(t, i, s.id)).join('') + '</ul>' +
+      '<button class="add-row" data-a="st-add">' + ic('plus') + 'Add a subtask</button></section></div></div>' +
+      '<div class="sheet-foot" id="storyfoot">' + footStory(s) + '</div>';
   }
-  function storyCard(s) {
+  function descText(s) {
+    const tmp = document.createElement('div'); tmp.innerHTML = MD.render(s.description || '');
+    const p = tmp.querySelector('p'); return ((p || tmp).textContent || '').trim();
+  }
+  function cardInner(s) {
     const nAc = s.acceptance_criteria.filter((x) => x.trim()).length, nDone = s.subtasks.filter((t) => t.done).length, ed = storyEdited(s);
-    return '<article class="card story' + (s.id === S.sel ? ' sel' : '') + (ed ? '' : ' firm') + '" role="button" tabindex="0" aria-pressed="' + (s.id === S.sel) + '" data-a="sel" data-k="' + esc(s.id) + '">' +
-      '<div class="card-h"><span class="id">' + esc(s.id) + '</span>' + reqTags(reqsOf(s.labels)) + '<span class="tag">' + esc(s.status) + '</span><span class="tag prio ' + prioCls(s.priority) + '">' + esc(s.priority) + '</span>' + stateTag(ed) + '</div>' +
-      '<div class="story-title">' + mi(s.title) + '</div>' +
-      '<div class="meta">' + nAc + ' acceptance criteri' + (nAc === 1 ? 'on' : 'a') + ' · ' + nDone + '/' + s.subtasks.length + ' subtask' + (s.subtasks.length === 1 ? '' : 's') + (s.assignee ? ' · ' + esc(s.assignee) : '') + '</div></article>';
+    return '<span class="card-k"><span class="key">' + ic('story') + esc(s.id) + '</span>' + statusChip(s.status) + '</span>' +
+      (ed ? '<span class="card-r"><i class="dot"></i>Edited</span>' : '<span class="card-r ok">' + ic('check') + 'Saved</span>') +
+      '<span class="card-t">' + mi(s.title) + '</span><span class="card-x">' + esc(descText(s)) + '</span>' +
+      '<span class="card-m">' + reqChips(reqsOf(s.labels).map((l) => l.toUpperCase())) + '<span class="sp"></span><span class="hint">' + nAc + ' criteri' + (nAc === 1 ? 'on' : 'a') + ' · ' + nDone + '/' + s.subtasks.length + ' subtask' + (s.subtasks.length === 1 ? '' : 's') + '</span>' + prio(s.priority) +
+      (s.assignee ? '<span class="avatar" title="' + esc(s.assignee) + '">' + esc(initials(s.assignee)) + '</span>' : '<span class="avatar none" title="Unassigned"></span>') + '</span>';
   }
+  const storyCard = (s) => '<li><button class="card" data-a="sel" data-k="' + esc(s.id) + '" aria-current="' + (ui.sheet === 'story' && s.id === S.sel) + '">' + cardInner(s) + '</button></li>';
   function renderStories() {
     const L = S.draft.stories || [];
-    return head('Stories', L.length + ' stories drafted from your documents. Select one to review it in the detail panel; descriptions and criteria show formatted — use the Write tab to edit. Edits stay in a draft until you <b>Save all</b>.', csvBtn('csv-stories')) +
-      '<div class="split"><div class="list">' + L.map(storyCard).join('') + '</div>' + renderPanel() + '</div>' + saveBar();
+    return head(plural(L.length, 'story', 'stories') + ', drafted for review', 'Drafted from your documents. Open a story to review it in the detail panel; descriptions and criteria show formatted — use the Write tab to edit. Edits stay in a draft until you <b>Save all</b>.', csvBtn('csv-stories')) +
+      '<ol class="cards" id="cards">' + L.map(storyCard).join('') + '</ol>' + nextRow();
   }
 
   // ---------- 3. Test plan ----------
   const PLAN_LABELS = { objectives: 'Objectives', scope_in: 'Scope — in', scope_out: 'Scope — out', approach: 'Approach', entry_criteria: 'Entry criteria', exit_criteria: 'Exit criteria', risks: 'Risks' };
   function planBlock(p, k) {
     const isList = Array.isArray(p[k]), v = isList ? p[k].join('\n') : (p[k] || '');
-    return '<div class="block"><label class="l">' + PLAN_LABELS[k] + (isList ? ' · one per line' : '') + '</label>' + rt('plan|' + k, v, isList ? 'ac' : '', 3) + '</div>';
+    return rt('plan|' + k, v, isList ? 'ac' : '', 3) + (isList ? '<p class="hint" style="margin-top:6px">One per line</p>' : '');
   }
   function renderPlan() {
     const p = S.draft.plan;
     const lede = 'A strategy-level plan derived from the saved stories: scope, approach, criteria and risks. List sections take one item per line.';
-    if (!p) return head('Test plan', lede) + '<div class="card empty"><p>No plan yet — generate one from the saved stories.</p>' + genBtn(false, 'gen-plan', 'Generate test plan →') + '</div>' + errBox();
+    if (!p) return head('Test plan', lede) + '<div class="empty-card"><p>No plan yet — generate one from the saved stories.</p>' + genBtn(false, 'gen-plan', 'Generate test plan') + '</div>' + errBox();
+    const sec = (title, body) => '<section class="plan-sec"><h2>' + title + '</h2><div>' + body + '</div></section>';
     return head('Test plan', lede, csvBtn('csv-plan') + genBtn(true, 'gen-plan')) + errBox() +
-      '<article class="card firm planbox"><div class="card-h"><span class="id">PLAN-1</span><span class="tag">strategy</span>' + stateTag(dirty('plan')) + '</div>' +
-      planBlock(p, 'objectives') + '<div class="two">' + planBlock(p, 'scope_in') + planBlock(p, 'scope_out') + '</div>' +
-      ['approach', 'entry_criteria', 'exit_criteria', 'risks'].map((k) => planBlock(p, k)).join('') + '</article>' + saveBar();
+      '<div class="plan">' + sec('Objectives', planBlock(p, 'objectives')) +
+      sec('Scope', '<div class="plan-two"><div><h3>In scope</h3>' + planBlock(p, 'scope_in') + '</div><div><h3>Out of scope</h3>' + planBlock(p, 'scope_out') + '</div></div>') +
+      sec('Approach', planBlock(p, 'approach')) + sec('Entry criteria', planBlock(p, 'entry_criteria')) + sec('Exit criteria', planBlock(p, 'exit_criteria')) + sec('Risks', planBlock(p, 'risks')) + '</div>' + nextRow();
   }
-
-  // ---------- requirement model (shared by coverage strip + report) ----------
-  function reqModel(stories, cases) {
-    const reqs = {}, add = (r) => (reqs[r] = reqs[r] || { id: r, stories: [], cases: [] });
-    stories.forEach((s) => reqsOf(s.labels).forEach((l) => add(l.toUpperCase()).stories.push(s)));
-    cases.forEach((c) => String(c.requirement_ref).split(/[,\s]+/).filter(Boolean).forEach((r) => add(r.toUpperCase()).cases.push(c)));
-    return Object.values(reqs).sort((a, b) => a.id.localeCompare(b.id)).map((r) => Object.assign(r, { verdict: ST.verdict(r.cases) }));
-  }
-  const reportModel = () => reqModel(S.stories, S.cases);
-  const VCLS = { PROVEN: 'pass', PARTIAL: 'blocked', FAILED: 'fail', 'NOT RUN': 'notrun' };
 
   // ---------- 4. Test cases ----------
-  // traceability: requirements -> stories -> cases -> verdict, colored by saved run results
+  const VCLS = { PROVEN: 'pass', PARTIAL: 'blocked', FAILED: 'fail', 'NOT RUN': 'notrun' };
+  // traceability: requirements -> stories -> cases -> verdict, drawn in ink; green only for proven/pass, red only for fail
   function covMermaid(M) {
     const safe = (s) => String(s).replace(/[^A-Za-z0-9._ -]/g, ''), nid = {}, nodes = [], edges = new Set(), lines = ['flowchart LR',
-      '    classDef req fill:#eef2ff,stroke:#6366f1,color:#1e1b4b', '    classDef story fill:#fff,stroke:#94a3b8,color:#334155',
-      '    classDef pass fill:#D5F2E1,stroke:#0E6B3F,color:#0E6B3F', '    classDef fail fill:#FDD9DC,stroke:#A31D2B,color:#A31D2B',
-      '    classDef blocked fill:#FFEBB8,stroke:#C98A00,color:#855000', '    classDef notrun fill:#F1EFFB,stroke:#8F8CA8,color:#5B5878'];
+      '    classDef req fill:#f1f3f1,stroke:#454f4b,color:#111816', '    classDef story fill:#fff,stroke:#cbd1cc,color:#454f4b',
+      '    classDef pass fill:#e6f2ec,stroke:#0b7a57,color:#0a6347', '    classDef fail fill:#fbebe9,stroke:#b3261e,color:#9d2019',
+      '    classDef blocked fill:#f1f3f1,stroke:#454f4b,color:#454f4b,stroke-dasharray:4 3', '    classDef notrun fill:#fff,stroke:#cbd1cc,color:#69736e'];
     const node = (kind, id, label, cls, shape) => {
       const key = kind + id; if (nid[key]) return nid[key];
       const n = nid[key] = kind + Object.keys(nid).length;
@@ -259,63 +394,86 @@
   function covHtml(C) {
     const M = reqModel(S.draft.stories || [], C), covered = M.filter((r) => r.cases.length).length, tally = {};
     M.forEach((r) => (tally[r.verdict] = (tally[r.verdict] || 0) + 1));
-    return '<section class="cov" aria-label="Requirement coverage"><div class="cov-n">' + C.length + ' test case' + (C.length === 1 ? '' : 's') + ' · ' + covered + ' of ' + M.length + ' requirements covered</div>' +
-      '<div class="cov-v">' + ['PROVEN', 'PARTIAL', 'FAILED', 'NOT RUN'].map((v) => '<span class="chip ' + VCLS[v] + '">' + (tally[v] || 0) + ' ' + v + '</span>').join('') + '</div>' +
+    return '<section class="cov" aria-label="Requirement coverage"><div class="cov-n">' + plural(C.length, 'test case') + ' · ' + covered + ' of ' + M.length + ' requirements covered</div>' +
+      '<div class="counts cov-v">' + ['PROVEN', 'PARTIAL', 'FAILED', 'NOT RUN'].map((v) => '<span><i class="mark" data-v="' + VKEY[v] + '"></i><b>' + (tally[v] || 0) + '</b>' + v.toLowerCase() + '</span>').join('') + '</div>' +
       '<div class="cov-map">' + (M.length ? MD.render(covMermaid(M)) : '<span class="hint">Link cases to requirements (e.g. REQ-001) to see the traceability map.</span>') + '</div></section>';
   }
   function testCard(c, i) {
-    const refs = String(c.requirement_ref).split(/[,\s]+/).filter(Boolean), cp = 'case|' + i + '|';
-    return '<article class="card firm testcase" data-card="' + i + '"><div class="card-h"><span class="id">' + esc(c.id) + '</span>' + reqTags(refs) + '<span class="tag prio ' + prioCls(c.priority) + '">' + esc(c.priority) + '</span>' +
-      '<button class="x" data-a="case-rm" data-k="' + i + '" aria-label="Remove case ' + esc(c.id) + '" title="Remove">×</button></div>' +
-      '<div class="fields f4"><div><label class="l">ID</label><input type="text" data-i="case" data-f="id" data-k="' + i + '" value="' + esc(c.id) + '" aria-label="ID"></div>' +
-      '<div><label class="l">Req ref</label><input type="text" data-i="case" data-f="requirement_ref" data-k="' + i + '" value="' + esc(c.requirement_ref) + '" aria-label="Requirement ref"></div>' +
-      '<div class="span2"><label class="l">Priority</label><select data-c="case-prio" data-k="' + i + '" aria-label="Priority">' + PRIOS.map((x) => '<option' + (x === c.priority ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></div></div>' +
-      '<label class="l">Title</label><input type="text" class="title-in" data-i="case" data-f="title" data-k="' + i + '" value="' + esc(c.title) + '" aria-label="Title">' +
-      '<div class="two"><div><label class="l">Steps · numbered, one per line</label>' + rt(cp + 'steps', c.steps.join('\n'), 'steps', 3) + '</div>' +
-      '<div><label class="l">Expected result</label>' + rt(cp + 'expected', c.expected, '', 3) + '</div></div></article>';
+    const refs = String(c.requirement_ref).split(/[,\s]+/).filter(Boolean).map((r) => r.toUpperCase()), cp = 'case|' + i + '|';
+    return '<div class="cblock" data-card="' + i + '"><div class="cblock-h"><span class="cid">' + esc(c.id) + '</span>' + reqChips(refs) + '<span class="sp"></span>' + prio(c.priority) +
+      '<button class="row-x" data-a="case-rm" data-k="' + i + '" aria-label="Remove case ' + esc(c.id) + '" title="Remove">' + ic('x') + '</button></div>' +
+      '<div class="cfields"><div><label class="lbl">ID</label><input type="text" class="in" data-i="case" data-f="id" data-k="' + i + '" value="' + esc(c.id) + '" aria-label="ID"></div>' +
+      '<div><label class="lbl">Requirement</label><input type="text" class="in" data-i="case" data-f="requirement_ref" data-k="' + i + '" value="' + esc(c.requirement_ref) + '" aria-label="Requirement ref"></div>' +
+      '<div><label class="lbl">Priority</label><select class="in" data-c="case-prio" data-k="' + i + '" aria-label="Priority">' + PRIOS.map((x) => '<option' + (x === c.priority ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></div></div>' +
+      '<label class="lbl">Title</label><input type="text" class="in case-title" data-i="case" data-f="title" data-k="' + i + '" value="' + esc(c.title) + '" aria-label="Title">' +
+      '<div class="ctwo"><div><label class="lbl">Steps · numbered, one per line</label>' + rt(cp + 'steps', c.steps.join('\n'), 'steps', 3) + '</div>' +
+      '<div><label class="lbl">Expected result</label>' + rt(cp + 'expected', c.expected, '', 3) + '</div></div></div>';
   }
   function renderCases() {
     const C = S.draft.cases;
     const lede = 'Traceable to requirements. Steps and expected results show formatted — use the Write tab to edit.';
-    if (!C) return head('Test cases', lede) + '<div class="card empty"><p>No cases yet — generate them from the saved plan and stories.</p>' + genBtn(false, 'gen-cases', 'Generate test cases →') + '</div>' + errBox();
-    return head('Test cases', C.length + ' cases, each tagged with the requirement it proves. ' + lede, csvBtn('csv-cases') + '<button class="ghost" data-a="case-add">+ Add case</button>' + genBtn(true, 'gen-cases')) + errBox() +
-      covHtml(C) + '<div class="list">' + C.map(testCard).join('') + '</div>' + saveBar();
+    if (!C) return head('Test cases', lede) + '<div class="empty-card"><p>No cases yet — generate them from the saved plan and stories.</p>' + genBtn(false, 'gen-cases', 'Generate test cases') + '</div>' + errBox();
+    return head(plural(C.length, 'test case'), 'Each case is tagged with the requirement it proves. ' + lede, csvBtn('csv-cases') + '<button class="btn btn-q btn-s" data-a="case-add">' + ic('plus') + 'Add a case</button>' + genBtn(true, 'gen-cases')) + errBox() +
+      covHtml(C) + '<div class="casebox">' + C.map(testCard).join('') + '</div>' + nextRow();
   }
 
   // ---------- 5. Run ----------
   const hasSample = () => Object.values(S.results).some((r) => r.sample);
-  const sampleBanner = () => hasSample() ? '<div class="note"><span class="sample-tag">SAMPLE DATA</span> Results below include demo values, not real test execution.</div>' : '';
+  const sampleBanner = () => hasSample() ? '<div class="note"><span class="sample-tag">Sample data</span><span>Results below include demo values, not real test execution.</span></div>' : '';
   function counts() {
     const c = { PASS: 0, FAIL: 0, BLOCKED: 0, 'NOT RUN': 0 };
     S.cases.forEach((x) => { const r = S.results[x.id]; c[r ? r.status : 'NOT RUN']++; });
     return c;
   }
+  function runRow(t) {
+    const r = S.results[t.id] || {}, open = ui.runOpen.has(t.id);
+    return '<li class="run' + (open ? ' open' : '') + '" data-id="' + esc(t.id) + '"><button class="run-tog" data-a="run-tog" data-k="' + esc(t.id) + '" aria-expanded="' + open + '" aria-label="Steps for ' + esc(t.id) + '">' + ic('right') + '</button><span class="run-id">' + esc(t.id) + '</span>' +
+      '<div class="run-main"><div class="run-t"><span class="tt">' + mi(t.title) + '</span>' + reqChips(String(t.requirement_ref).split(/[,\s]+/).filter(Boolean).map((x) => x.toUpperCase())) + (r.sample ? '<span class="sample-tag">Sample</span>' : '') + '</div>' +
+      '<div class="run-more"><div><div class="run-spec"><div><h4>Steps</h4><ol class="steps">' + t.steps.map((x) => '<li>' + mi(x.replace(/^\d+[.)]\s+/, '')) + '</li>').join('') + '</ol></div><div><h4>Expected result</h4><p>' + mi(t.expected) + '</p></div></div></div></div>' +
+      '<textarea class="run-in" rows="1" data-i="note" data-k="' + esc(t.id) + '" aria-label="Evidence / notes for ' + esc(t.id) + '" placeholder="Evidence / notes" spellcheck="false"' + (r.status ? '' : ' disabled') + '>' + esc(r.note || '') + '</textarea></div>' +
+      '<div class="seg" role="radiogroup" aria-label="Result for ' + esc(t.id) + '">' + ['PASS', 'FAIL', 'BLOCKED'].map((k) => '<button role="radio" aria-checked="' + (r.status === k) + '" data-a="mark" data-k="' + esc(t.id) + '" data-v="' + k.toLowerCase() + '">' + RLABEL[k.toLowerCase()] + '</button>').join('') + '</div></li>';
+  }
   function renderRun() {
-    const c = counts(), n = S.cases.length || 1;
-    return head('Run', 'Mark each test case as you execute it. Phase 1 is manual; automation comes later.', '<button class="ghost" data-a="clear-results">Clear all results</button><button class="primary" data-a="go" data-k="5">Report →</button>') +
+    const c = counts(), t = { pass: c.PASS, fail: c.FAIL, blocked: c.BLOCKED, none: c['NOT RUN'] };
+    const list = S.cases.filter((x) => { const s = (S.results[x.id] || {}).status; return ui.rfilter === 'all' || (ui.rfilter === 'todo' ? !s : s === 'FAIL' || s === 'BLOCKED'); });
+    return head('Run', 'Mark each test case as you execute it. Phase 1 is manual; automation comes later. Your notes become the evidence in the report.', '<button class="btn btn-q btn-s" data-a="clear-results">Clear all results</button>') +
       (anyDirty() ? '<div class="note">You have unsaved edits; this screen uses the last saved version.</div>' : '') + sampleBanner() +
-      '<label class="sampleline"><input type="checkbox" data-c="sample"' + (S.sampleResults ? ' checked' : '') + '> <span><b>Fill sample results</b> <span class="sample-tag">DEMO</span> — a labeled 11 PASS / 2 FAIL / 2 BLOCKED mix with notes. Nothing really executes.</span></label>' +
-      '<div class="sum">' + ['PASS', 'FAIL', 'BLOCKED', 'NOT RUN'].map((k) => '<div class="stat s-' + k.replace(' ', '') + '"><b>' + c[k] + '</b><span>' + k + '</span></div>').join('') + '</div>' +
-      '<div class="progress" role="img" aria-label="Run progress">' + ['PASS', 'FAIL', 'BLOCKED'].map((k) => '<i class="i-' + k + '" style="width:' + (100 * c[k] / n) + '%"></i>').join('') + '</div>' +
-      '<div class="rows">' + S.cases.map((t) => {
-        const r = S.results[t.id] || {};
-        return '<div class="run"><span class="id">' + esc(t.id) + '</span><span class="run-t">' + mi(t.title) + ' <span class="tag">' + esc(t.requirement_ref) + '</span>' + (r.sample ? ' <span class="sample-tag">SAMPLE</span>' : '') + '</span>' +
-          '<div class="seg">' + ['PASS', 'FAIL', 'BLOCKED'].map((k) => '<button class="' + k + (r.status === k ? ' on' : '') + '" data-a="mark" data-k="' + esc(t.id) + '" data-v="' + k + '" aria-pressed="' + (r.status === k) + '">' + k + '</button>').join('') + '</div>' +
-          '<input class="note-in" data-i="note" data-k="' + esc(t.id) + '" aria-label="Evidence / notes for ' + esc(t.id) + '" placeholder="Evidence / notes" value="' + esc(r.note || '') + '"' + (r.status ? '' : ' disabled') + '></div>';
-      }).join('') + '</div>';
+      '<label class="sampleline"><input type="checkbox" data-c="sample"' + (S.sampleResults ? ' checked' : '') + '> <span><b>Fill sample results</b> <span class="sample-tag">Demo</span> — a labeled 11 PASS / 2 FAIL / 2 BLOCKED mix with notes. Nothing really executes.</span></label>' +
+      '<div class="run-sum"><div class="meter" role="img" aria-label="Results so far">' + ['pass', 'fail', 'blocked', 'none'].map((k) => '<i data-v="' + k + '" style="--n:' + t[k] + '"></i>').join('') + '</div>' +
+      '<div class="counts">' + [['pass', 'passed', 'pass'], ['fail', 'failed', 'fail'], ['blocked', 'blocked', 'blocked'], ['none', 'not run', 'notrun']].map(([k, l, m]) => '<span><i class="mark" data-v="' + m + '"></i><b>' + t[k] + '</b>' + l + '</span>').join('') + '</div></div>' +
+      '<div class="bar tight">' + tabs('rfilter', ui.rfilter, [['all', 'All', S.cases.length], ['todo', 'Still to run', t.none], ['attn', 'Failed or blocked', t.fail + t.blocked]]) + '</div>' +
+      '<ol class="runs">' + (list.map(runRow).join('') || '<li class="empty" style="border:0">Nothing in this view.</li>') + '</ol>' + nextRow();
   }
 
   // ---------- 6. Report ----------
+  const passLine = (r) => (r.cases.length ? r.cases.filter((c) => (S.results[c.id] || {}).status === 'PASS').length + ' of ' + r.cases.length + ' passed' : 'No cases');
+  function evidence(c) {
+    const x = S.results[c.id], k = resKey(c.id);
+    return '<li class="ev"><i class="mark" data-v="' + k + '"></i><span class="ev-id">' + esc(c.id) + '</span><div><div class="ev-t"><span>' + mi(c.title) + (x && x.sample ? ' <span class="sample-tag">Sample</span>' : '') + '</span>' + vText(k, RLABEL[k]) + '</div>' +
+      '<p class="ev-n">' + (x && x.note ? mi(x.note) : x ? 'No note was recorded.' : 'Not run yet.') + '</p></div></li>';
+  }
+  function reportRow(r) {
+    const v = VKEY[r.verdict], open = ui.open.has(r.id);
+    return '<li class="rr' + (open ? ' open' : '') + (ui.trace === r.id ? ' rel' : '') + '" id="rr-' + esc(r.id) + '"><button class="rr-h" data-a="rr-tog" data-k="' + esc(r.id) + '" aria-expanded="' + open + '">' +
+      '<i class="mark" data-v="' + v + '"></i><span class="rr-id">' + esc(r.id) + '</span><span class="rr-t">' + reqNameHtml(r) + '</span>' + vText(v, VLABEL[v]) + '<span class="rr-c">' + passLine(r) + '</span>' + ic('right', 'caret') + '</button>' +
+      '<div class="rr-b"><div><div class="rr-in"><p class="rr-src">' + (r.stories.length ? r.stories.map((s) => '<span>Story ' + esc(s.id) + ' · ' + mi(s.title) + '</span>').join('') : '<span>No linked story</span>') + '</p>' +
+      '<ol>' + (r.cases.length ? r.cases.map(evidence).join('') : '<li class="ev"><span></span><span></span><p class="ev-n">No test case covers this requirement yet.</p></li>') + '</ol></div></div></div></li>';
+  }
   function renderReport() {
-    const M = reportModel(), tally = {};
-    M.forEach((r) => (tally[r.verdict] = (tally[r.verdict] || 0) + 1));
-    return head('Report', 'Proof per requirement, rendered from saved stories, cases and run results.', '<button class="primary" data-a="copy-summary">Copy summary</button>') + sampleBanner() +
-      '<div class="sumline">' + ['PROVEN', 'PARTIAL', 'FAILED', 'NOT RUN'].map((v) => '<div class="big ' + VCLS[v] + '"><b>' + (tally[v] || 0) + '</b>' + v + '</div>').join('') + '</div>' +
-      M.map((r) => '<article class="req ' + VCLS[r.verdict] + '"><header><b class="id">' + esc(r.id) + '</b><span class="v ' + r.verdict.replace(' ', '') + '">' + r.verdict + '</span><span class="by">' + (r.stories.map((s) => esc(s.id) + ' ' + mi(s.title)).join(' · ') || 'No linked story') + '</span></header>' +
-        '<ul>' + (r.cases.length ? r.cases.map((c) => { const x = S.results[c.id]; return '<li><span class="id">' + esc(c.id) + '</span><span class="v ' + (x ? x.status : 'NOTRUN') + '">' + (x ? x.status : 'NOT RUN') + '</span><span>' + mi(c.title) + (x && x.sample ? ' <span class="sample-tag">SAMPLE</span>' : '') + '</span>' + (x && x.note ? '<span class="ev">Evidence: ' + mi(x.note) + '</span>' : '') + '</li>'; }).join('') : '<li class="ev">No test cases linked to this requirement.</li>') + '</ul></article>').join('');
+    const M = reportModel(), n = M.length, tally = { proven: 0, partial: 0, failed: 0, notrun: 0 };
+    M.forEach((r) => tally[VKEY[r.verdict]]++);
+    const list = ui.pfilter === 'all' ? M : M.filter((r) => r.verdict !== 'PROVEN');
+    const title = tally.proven === n ? 'All ' + n + ' requirements proven' : tally.proven === 0 ? 'No requirements proven yet' : tally.proven + ' of ' + n + ' requirements proven';
+    return head(title, 'Proof per requirement, rendered from saved stories, cases and run results. A requirement is proven when every test case that covers it has passed.') + sampleBanner() +
+      '<div class="hero" style="--cols:' + n + '" role="group" aria-label="Verdict for each requirement">' + M.map((r, k) => '<button data-a="rr-jump" data-k="' + esc(r.id) + '" title="' + esc(r.id + ' · ' + reqName(r)) + '" aria-label="' + esc(r.id + ', ' + reqName(r) + ', ' + VLABEL[VKEY[r.verdict]]) + '"><i class="mark" data-v="' + VKEY[r.verdict] + '" style="--k:' + k + '"></i><span class="n">' + esc(r.id.replace(/^REQ-0*/, '')) + '</span></button>').join('') + '</div>' +
+      '<div class="counts" style="margin-bottom:40px">' + ['proven', 'partial', 'failed', 'notrun'].map((k) => '<span><i class="mark" data-v="' + k + '"></i><b>' + tally[k] + '</b>' + VLABEL[k].toLowerCase() + '</span>').join('') + '</div>' +
+      '<div class="rep-bar">' + tabs('pfilter', ui.pfilter, [['all', 'All', n], ['open', 'Not yet proven', n - tally.proven]]) + '<span class="sp"></span>' +
+      '<button class="btn btn-q btn-s" data-a="rr-all">' + (list.length && list.every((r) => ui.open.has(r.id)) ? 'Collapse all' : 'Expand all') + '</button>' +
+      '<button class="btn btn-q btn-s" data-a="copy-summary">Copy summary</button><button class="btn btn-q btn-s" data-a="print">' + ic('print') + 'Print or save as PDF</button></div>' +
+      '<ol class="rep" id="rep">' + (list.map(reportRow).join('') || '<li class="empty" style="border:0">Every requirement is proven.</li>') + '</ol>';
   }
   function summaryText() {
-    const M = reportModel(), c = counts();
+    const M = reqModel(S.stories, S.cases), c = counts();
     return 'Being Agile proof summary' + (hasSample() ? ' (INCLUDES SAMPLE DATA)' : '') + '\nCases: ' + c.PASS + ' PASS, ' + c.FAIL + ' FAIL, ' + c.BLOCKED + ' BLOCKED, ' + c['NOT RUN'] + ' NOT RUN\n\n' +
       M.map((r) => r.id + ': ' + r.verdict + ' — ' + (r.stories.map((s) => s.title).join('; ') || 'no story') + '\n' +
         r.cases.map((x) => '  ' + x.id + ' ' + ((S.results[x.id] || {}).status || 'NOT RUN') + ((S.results[x.id] || {}).note ? ' — ' + S.results[x.id].note : '')).join('\n')).join('\n');
@@ -326,26 +484,33 @@
   function render() {
     if (!ST.unlocked(S.step)) S.step = 0;
     renderChrome();
-    const y = window.scrollY, ae = document.activeElement, keep = ae && ae.dataset && ae.dataset.i ? { i: ae.dataset.i, k: ae.dataset.k, f: ae.dataset.f } : null;
-    const pb = app.querySelector('.panel-b'), pbTop = pb ? pb.scrollTop : 0;
-    app.innerHTML = '<div class="screen s' + S.step + ' fade">' + SCREENS[S.step]() + '</div>';
-    window.scrollTo(0, y);
-    const npb = app.querySelector('.panel-b'); if (npb) npb.scrollTop = pbTop;
-    hydrate(app);
+    const y = view.scrollTop, ae = document.activeElement, keep = ae && ae.dataset && ae.dataset.i && stage.contains(ae) ? { i: ae.dataset.i, k: ae.dataset.k, f: ae.dataset.f } : null;
+    const sb = sheetEl.querySelector('.sheet-body'), sbTop = sb ? sb.scrollTop : 0;
+    view.innerHTML = '<div class="page' + (S.step === 3 || S.step === 4 ? ' full' : '') + (ui.enter ? ' enter' : '') + '">' + SCREENS[S.step]() + '</div>';
+    ui.enter = false;
+    view.scrollTop = y;
+    hydrate(view);
+    paintSheet(sbTop);
+    if (ui.scrollTo) { const t = view.querySelector(ui.scrollTo); if (t) t.scrollIntoView({ block: 'start' }); ui.scrollTo = null; }
     if (ui.focus) { const el = app.querySelector(ui.focus); if (el) el.focus(); ui.focus = null; }
     else if (keep) { const el = app.querySelector('[data-i="' + keep.i + '"]' + (keep.k != null ? '[data-k="' + keep.k + '"]' : '') + (keep.f ? '[data-f="' + keep.f + '"]' : '')); if (el) el.focus(); }
   }
-  // cheap live refresh while typing (no re-render): save bar + the open story's state tags
+  // cheap live refresh while typing (no re-render): save state, next-row hint, the open story's card + footer
   function touch() {
-    const b = document.querySelector('#bar .bar-in'); if (b) b.innerHTML = barInner();
+    chromeSave();
+    const nx = $('next'); if (nx) nx.innerHTML = nextInner();
     const s = S.step === 1 && curStory();
     if (s) {
-      const ed = storyEdited(s), set = (el) => { if (el) { el.className = 'state ' + (ed ? 'edited' : 'ok'); el.textContent = ed ? 'Edited' : 'Saved'; } };
-      set(app.querySelector('.panel .state')); set(app.querySelector('.story.sel .state'));
-      const c = app.querySelector('.story.sel'); if (c) c.classList.toggle('firm', !ed);
+      const c = view.querySelector('.card[data-k="' + (window.CSS && CSS.escape ? CSS.escape(s.id) : s.id) + '"]'); if (c) c.innerHTML = cardInner(s);
+      const f = $('storyfoot'); if (f) f.innerHTML = footStory(s);
     }
   }
-  function go(i) { if (!ST.unlocked(i)) return; S.step = i; ST.save(); ui.error = ''; ui.subEdit = null; closeDocPanel(); render(); window.scrollTo(0, 0); }
+  function go(i) {
+    if (!ST.unlocked(i)) return;
+    S.step = i; ST.save(); ui.error = ''; ui.subEdit = null; ui.sheet = null; ui.enter = true;
+    stage.classList.remove('open'); delete stage.dataset.sheet;
+    render(); if (!ui.scrollTo) view.scrollTop = 0;
+  }
 
   // ---------- commit ----------
   function cleanDraft() {
@@ -354,29 +519,45 @@
     if (D.stories) D.stories.forEach((s) => { s.acceptance_criteria = s.acceptance_criteria.filter((x) => x.trim()); s.subtasks = s.subtasks.filter((t) => t.text.trim()); });
     if (D.cases) D.cases.forEach((c) => { c.steps = c.steps.filter((x) => x.trim()); });
   }
+  let savedT;
   function saveAll() {
     cleanDraft(); ui.subEdit = null;
     ['stories', 'plan', 'cases'].forEach((k) => { if (S.draft[k]) S[k] = ST.clone(S.draft[k]); });
-    ST.save(); toast('Saved'); render();
+    ST.save(); toast('Saved'); ui.justSaved = true; render();
+    clearTimeout(savedT); savedT = setTimeout(() => { ui.justSaved = false; chromeSave(); }, 2600);
+  }
+  function setTheme(dark) {
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    try { localStorage.setItem('being-agile-theme', dark ? 'dark' : 'light'); } catch (e) { /* ignore */ }
+    const b = $('btn-theme'); b.innerHTML = ic(dark ? 'sun' : 'moon'); b.setAttribute('aria-label', dark ? 'Switch to the light theme' : 'Switch to the dark theme');
   }
 
   // ---------- actions ----------
   const A = {
-    'open-doc': (el) => openDocPanel(docRef(el.dataset.k), el.dataset.label, el.dataset.k),
-    'close-doc': closeDocPanel,
+    'open-doc': (el) => openDocSheet(docRef(el.dataset.k), el.dataset.label, el.dataset.k),
+    'sheet-close': closeSheet,
+    theme: () => setTheme(document.documentElement.dataset.theme !== 'dark'),
+    trace: (el) => {
+      const id = el.dataset.k;
+      if (!ST.unlocked(5)) { toast('The report unlocks once test cases exist'); return; }
+      if (ui.trace === id && S.step === 5) { ui.trace = null; render(); return; }
+      ui.trace = id; ui.open.add(id); ui.scrollTo = '#rr-' + id;
+      if (S.step !== 5) go(5); else render();
+    },
+    'trace-clear': () => { ui.trace = null; render(); },
     'toggle-paste': (el) => { ui.paste[el.dataset.k] = !ui.paste[el.dataset.k]; ui.focus = '[data-i="doc"][data-k="' + el.dataset.k + '"]'; render(); },
     'add-extra': () => { S.docs.extras.push({ name: '', text: '' }); ST.save(); render(); },
-    'rm-extra': (el) => { S.docs.extras.splice(+el.dataset.k, 1); ST.save(); closeDocPanel(); render(); },
+    'rm-extra': (el) => { S.docs.extras.splice(+el.dataset.k, 1); ST.save(); closeSheet(); render(); },
     'load-sample': () => {
       const live = !AI.getConfig().dryRun;
       const d = live ? window.SAMPLE.docsCondensed : window.SAMPLE.docs, sfx = live ? '-condensed' : '';
       S.docs.prd = { name: 'prd' + sfx + '.md (NPPES sample)', text: d.prd }; S.docs.design = { name: 'design' + sfx + '.md (NPPES sample)', text: d['design']  }; S.docs.api = { name: 'api-spec' + sfx + '.md (NPPES sample)', text: d['api-spec'] };
-      ST.save(); render(); toast('NPPES sample loaded');
+      ST.save(); closeSheet(); render(); toast('NPPES sample loaded');
     },
     'gen-stories': () => guarded('stories', S.docs, 'Generate stories', (data) => {
       S.stories = data.map(ST.normStory); S.draft.stories = ST.clone(S.stories);
-      S.plan = null; S.draft.plan = null; S.cases = []; S.draft.cases = null; S.results = {}; S.sampleResults = false; ui.write = {}; ui.subEdit = null;
-      S.sel = S.stories[0] && S.stories[0].id; S.step = 1;
+      S.plan = null; S.draft.plan = null; S.cases = []; S.draft.cases = null; S.results = {}; S.sampleResults = false; ui.write = {}; ui.subEdit = null; ui.sheet = null;
+      S.sel = S.stories[0] && S.stories[0].id; S.step = 1; ui.enter = true;
     }),
     'gen-plan': () => { if (anyDirty() && !confirm('Unsaved edits will not be used. Continue with last saved stories?')) return; return guarded('plan', S.stories, 'Generate test plan', (data) => { S.plan = data; S.draft.plan = ST.clone(data); S.cases = []; S.draft.cases = null; S.results = {}; S.sampleResults = false; Object.keys(ui.write).forEach((k) => { if (k.indexOf('plan|') === 0) delete ui.write[k]; }); clearCaseTabs(); }); },
     'gen-cases': () => guarded('cases', { plan: S.plan, stories: S.stories }, 'Generate test cases', (data) => { S.cases = data.map(ST.normCase); S.draft.cases = ST.clone(S.cases); S.results = {}; S.sampleResults = false; clearCaseTabs(); }),
@@ -385,7 +566,11 @@
     'csv-plan': () => { cleanDraft(); toast('Downloaded ' + CSV.download('test-plan', CSV.planToCsv(S.draft.plan))); },
     'csv-cases': () => { cleanDraft(); toast('Downloaded ' + CSV.download('test-cases', CSV.casesToCsv(S.draft.cases))); },
     go: (el) => go(+el.dataset.k),
-    sel: (el) => { S.sel = el.dataset.k; ui.subEdit = null; ST.save(); render(); },
+    sel: (el) => { S.sel = el.dataset.k; ui.sheet = 'story'; ui.subEdit = null; ST.save(); ui.focus = '.card[data-k="' + el.dataset.k + '"]'; render(); },
+    'story-step': (el) => {
+      const L = S.draft.stories || [], i = L.findIndex((s) => s.id === S.sel), n = L[i + +el.dataset.k];
+      if (n) { S.sel = n.id; ui.subEdit = null; ST.save(); render(); const c = view.querySelector('.card[aria-current="true"]'); if (c) c.scrollIntoView({ block: 'nearest' }); }
+    },
     'rt-tab': (el) => {
       const box = el.closest('.rt'), w = el.dataset.t === 'write';
       ui.write[el.dataset.k] = w;
@@ -395,23 +580,39 @@
     },
     'st-add': () => { const s = curStory(); s.subtasks.push({ text: '', done: false }); ui.subEdit = s.id + '|' + (s.subtasks.length - 1); ui.focus = '[data-i="st-edit"]'; render(); },
     'st-pencil': (el) => { ui.subEdit = curStory().id + '|' + el.dataset.k; ui.focus = '[data-i="st-edit"]'; render(); },
+    'st-done': (el) => { const t = curStory().subtasks[+el.dataset.k]; t.done = !t.done; render(); touch(); },
     'st-save': (el) => {
       const s = curStory(), i = +el.dataset.k, inp = app.querySelector('[data-i="st-edit"][data-k="' + i + '"]');
       if (inp) s.subtasks[i].text = inp.value;
       if (!s.subtasks[i].text.trim()) s.subtasks.splice(i, 1);
-      ui.subEdit = null; render();
+      ui.subEdit = null; render(); touch();
     },
     'st-cancel': (el) => { const s = curStory(), i = +el.dataset.k; if (!s.subtasks[i].text.trim()) s.subtasks.splice(i, 1); ui.subEdit = null; render(); },
-    'st-rm': (el) => { curStory().subtasks.splice(+el.dataset.k, 1); ui.subEdit = null; render(); },
+    'st-rm': (el) => { curStory().subtasks.splice(+el.dataset.k, 1); ui.subEdit = null; render(); touch(); },
     'assist-toggle': (el) => { const a = (ui.assist[el.dataset.k] = ui.assist[el.dataset.k] || {}); a.open = !a.open; ui.focus = '[data-i="assist-prompt"][data-k="' + el.dataset.k + '"]'; render(); },
     assist: async (el) => { const a = ui.assist[el.dataset.k]; a.out = 'Thinking…'; render(); a.out = await AI.assist(el.dataset.k, a.prompt); render(); },
     'case-add': () => { S.draft.cases.push({ id: 'TC-' + String(S.draft.cases.length + 1).padStart(3, '0'), requirement_ref: '', title: '', steps: [], expected: '', priority: 'P1' }); ui.focus = '[data-i="case"][data-f="title"][data-k="' + (S.draft.cases.length - 1) + '"]'; render(); },
     'case-rm': (el) => { S.draft.cases.splice(+el.dataset.k, 1); clearCaseTabs(); render(); },
     mark: (el) => {
-      const id = el.dataset.k, v = el.dataset.v, cur = S.results[id];
+      const id = el.dataset.k, v = el.dataset.v.toUpperCase(), cur = S.results[id];
       if (cur && cur.status === v) delete S.results[id]; else S.results[id] = { status: v, note: cur && !cur.sample ? cur.note : '' };
       ST.save(); render();
     },
+    'run-tog': (el) => {
+      const id = el.dataset.k, row = el.closest('.run'), on = !ui.runOpen.has(id);
+      if (on) ui.runOpen.add(id); else ui.runOpen.delete(id);
+      row.classList.toggle('open', on); el.setAttribute('aria-expanded', String(on));
+    },
+    rfilter: (el) => { ui.rfilter = el.dataset.k; render(); },
+    pfilter: (el) => { ui.pfilter = el.dataset.k; render(); },
+    'rr-tog': (el) => { const id = el.dataset.k; if (ui.open.has(id)) ui.open.delete(id); else ui.open.add(id); render(); },
+    'rr-jump': (el) => { ui.open.add(el.dataset.k); ui.scrollTo = '#rr-' + el.dataset.k; if (ui.pfilter === 'open' && ui.vm[el.dataset.k] === 'proven') ui.pfilter = 'all'; render(); },
+    'rr-all': () => {
+      const list = reportModel().filter((r) => ui.pfilter === 'all' || r.verdict !== 'PROVEN');
+      if (list.every((r) => ui.open.has(r.id))) list.forEach((r) => ui.open.delete(r.id)); else list.forEach((r) => ui.open.add(r.id));
+      render();
+    },
+    print: () => window.print(),
     'clear-results': () => { S.results = {}; S.sampleResults = false; ST.save(); render(); },
     'copy-summary': async () => {
       const t = summaryText();
@@ -422,7 +623,7 @@
 
   // ---------- inputs (no re-render; keeps focus) ----------
   let saveT;
-  const I = {
+  const I_ = {
     doc: (el) => {
       const d = docRef(el.dataset.k), was = !!d.text.trim();
       d.text = el.value;
@@ -430,17 +631,16 @@
       clearTimeout(saveT); saveT = setTimeout(() => { ST.save(); const b = app.querySelector('[data-a="gen-stories"]'); if (b) b.disabled = ui.busy || ![S.docs.prd, S.docs.design, S.docs.api].concat(S.docs.extras).some((x) => x.text.trim()); }, 300);
     },
     rt: (el) => { setRT(el.dataset.k, el.value); grow(el); },
-    's-title': (el) => { curStory().title = el.value; const t = app.querySelector('.story.sel .story-title'); if (t) t.innerHTML = mi(el.value); },
+    's-title': (el) => { curStory().title = el.value.replace(/\n/g, ' '); grow(el); },
     's-assignee': (el) => { curStory().assignee = el.value; },
-    's-labels': (el) => { const s = curStory(); s.labels = el.value.split(',').map((x) => x.trim()).filter(Boolean); const c = app.querySelector('.cats'); if (c) c.innerHTML = catsHtml(s.labels); },
+    's-labels': (el) => { const s = curStory(); s.labels = el.value.split(',').map((x) => x.trim()).filter(Boolean); const c = $('cats'); if (c) c.innerHTML = catsHtml(s.labels); },
     'assist-prompt': (el) => { (ui.assist[el.dataset.k] = ui.assist[el.dataset.k] || {}).prompt = el.value; },
     case: (el) => { const c = S.draft.cases[+el.dataset.k]; c[el.dataset.f] = el.value; },
-    note: (el) => { const r = S.results[el.dataset.k]; if (r) { r.note = el.value; delete r.sample; clearTimeout(saveT); saveT = setTimeout(ST.save, 300); } },
+    note: (el) => { grow(el); const r = S.results[el.dataset.k]; if (r) { r.note = el.value; delete r.sample; clearTimeout(saveT); saveT = setTimeout(ST.save, 300); } },
   };
   const C = {
     's-status': (el) => { curStory().status = el.value; render(); },
     's-priority': (el) => { curStory().priority = el.value; render(); },
-    'st-done': (el) => { curStory().subtasks[+el.dataset.k].done = el.checked; render(); },
     'case-prio': (el) => { S.draft.cases[+el.dataset.k].priority = el.value; render(); },
     sample: (el) => { ST.setSampleResults(el.checked); ST.save(); render(); },
     file: (el) => readFile(el.files[0], el.dataset.k),
@@ -448,38 +648,47 @@
   function readFile(f, id) {
     if (!f) return;
     const r = new FileReader();
-    r.onload = () => { const d = docRef(id); d.name = f.name; d.text = String(r.result); ST.save(); render(); };
+    r.onload = () => { const d = docRef(id); d.name = f.name; d.text = String(r.result); ST.save(); if (ui.sheet === 'doc' && ui.docId === id) closeSheet(); render(); };
     r.readAsText(f);
   }
 
-  app.addEventListener('click', (e) => { const el = e.target.closest('[data-a]'); if (el && A[el.dataset.a] && !el.disabled) A[el.dataset.a](el); });
-  app.addEventListener('input', (e) => { const el = e.target.closest('[data-i]'); if (el && I[el.dataset.i]) { I[el.dataset.i](el); touch(); } });
-  app.addEventListener('change', (e) => { const el = e.target.closest('[data-c]'); if (el && C[el.dataset.c]) { C[el.dataset.c](el); touch(); } });
-  app.addEventListener('keydown', (e) => {
+  shell.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-a]');
+    if (!el || !A[el.dataset.a] || el.disabled) return;
+    if (el.classList.contains('doc') && e.target.closest('.doc-act, .doc-paste')) return; // row opens the viewer; its own controls do not
+    A[el.dataset.a](el);
+  });
+  stage.addEventListener('input', (e) => { const el = e.target.closest('[data-i]'); if (el && I_[el.dataset.i]) { I_[el.dataset.i](el); touch(); } });
+  stage.addEventListener('change', (e) => { const el = e.target.closest('[data-c]'); if (el && C[el.dataset.c]) { C[el.dataset.c](el); touch(); } });
+  stage.addEventListener('keydown', (e) => {
     const t = e.target;
     if (t.matches('[data-i="st-edit"]') && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); const b = app.querySelector('[data-a="' + (e.key === 'Enter' ? 'st-save' : 'st-cancel') + '"]'); if (b) b.click(); }
-    else if (t.matches('article[data-a="sel"]') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); t.click(); }
+    else if (t.matches('[data-i="s-title"]') && e.key === 'Enter') e.preventDefault();
+    else if (t.matches('[data-i="assist-prompt"]') && e.key === 'Enter') { e.preventDefault(); const b = app.querySelector('[data-a="assist"][data-k="' + t.dataset.k + '"]'); if (b) b.click(); }
   });
   document.addEventListener('keydown', (e) => {
-    const p = docPanel();
-    if (e.key === 'Escape' && p && !p.hidden) closeDocPanel();
-    else if ((e.key === 's' || e.key === 'S') && (e.ctrlKey || e.metaKey) && S.step >= 1 && S.step <= 3 && document.getElementById('lock').hidden) { e.preventDefault(); if (anyDirty()) saveAll(); }
+    const modal = $('modal'), dr = $('drawer');
+    if (e.key === 'Escape') {
+      if (!modal.hidden) { const c = modal.querySelector('[data-r="0"]'); if (c) c.click(); }
+      else if (!dr.hidden) { dr.hidden = true; $('btn-gear').setAttribute('aria-expanded', 'false'); }
+      else if (ui.sheet && !e.target.closest('input, textarea, select')) closeSheet();
+    } else if ((e.key === 's' || e.key === 'S') && (e.ctrlKey || e.metaKey) && S.step >= 1 && S.step <= 3 && $('lock').hidden) { e.preventDefault(); if (anyDirty()) saveAll(); }
   });
-  ['dragover', 'dragleave', 'drop'].forEach((ev) => app.addEventListener(ev, (e) => {
+  ['dragover', 'dragleave', 'drop'].forEach((ev) => view.addEventListener(ev, (e) => {
     const z = e.target.closest('[data-drop]'); if (!z) return;
     e.preventDefault(); z.classList.toggle('over', ev === 'dragover');
     if (ev === 'drop') readFile(e.dataTransfer.files[0], z.dataset.drop);
   }));
-  document.getElementById('steps').addEventListener('click', (e) => { const b = e.target.closest('[data-step]'); if (b) go(+b.dataset.step); });
+  nav.addEventListener('click', (e) => { const b = e.target.closest('[data-step]'); if (b) go(+b.dataset.step); });
 
   // ---------- settings drawer ----------
-  const drawer = document.getElementById('drawer'), keyEl = document.getElementById('set-key'), keepEl = document.getElementById('set-keep'), modelEl = document.getElementById('set-model');
+  const drawer = $('drawer'), keyEl = $('set-key'), keepEl = $('set-keep'), modelEl = $('set-model');
   modelEl.innerHTML = AI.MODELS.map((m) => '<option>' + m + '</option>').join('');
-  document.getElementById('btn-gear').onclick = () => { drawer.hidden = !drawer.hidden; if (!drawer.hidden && window.PinLock) window.PinLock.renderSettings(); };
-  document.getElementById('btn-drawer-close').onclick = () => { drawer.hidden = true; };
-  const dryEl = document.getElementById('set-dry');
+  $('btn-gear').onclick = () => { drawer.hidden = !drawer.hidden; $('btn-gear').setAttribute('aria-expanded', String(!drawer.hidden)); if (!drawer.hidden && window.PinLock) window.PinLock.renderSettings(); };
+  $('btn-drawer-close').onclick = () => { drawer.hidden = true; $('btn-gear').setAttribute('aria-expanded', 'false'); };
+  const dryEl = $('set-dry');
   dryEl.onchange = () => { S.dryRun = dryEl.checked; AI.configure({ dryRun: S.dryRun }); ST.save(); render(); };
-  const endEl = document.getElementById('set-endpoint'), endErr = document.getElementById('set-endpoint-err');
+  const endEl = $('set-endpoint'), endErr = $('set-endpoint-err');
   endEl.oninput = () => {
     const v = endEl.value.trim(), ok = !v || /^https:\/\//i.test(v);
     endErr.hidden = ok; endErr.textContent = ok ? '' : 'Endpoint must start with https:// (leave empty for the OpenAI default). Not saved.';
@@ -491,12 +700,13 @@
   const sess = (fn) => { try { return fn(sessionStorage); } catch (e) { return null; } };
   keyEl.oninput = () => { AI.configure({ apiKey: keyEl.value }); if (keepEl.checked) sess((s) => s.setItem(KEYSTORE, keyEl.value)); };
   keepEl.onchange = () => { sess((s) => (keepEl.checked ? s.setItem(KEYSTORE, keyEl.value) : s.removeItem(KEYSTORE))); };
-  document.getElementById('btn-reset').onclick = async () => {
+  $('btn-reset').onclick = async () => {
     if (!(await confirmBox('Reset demo?', '<p>This clears all saved documents, stories, plan, cases and results from this browser.</p>', 'Reset'))) return;
-    S = ST.reset(); AI.loadUsage([]); ui.assist = {}; ui.paste = {}; ui.write = {}; ui.subEdit = null; ui.error = ''; closeDocPanel(); render(); toast('Demo reset');
+    S = ST.reset(); AI.loadUsage([]); ui.assist = {}; ui.paste = {}; ui.write = {}; ui.subEdit = null; ui.error = ''; ui.trace = null; ui.open = new Set(); ui.runOpen = new Set(); closeSheet(); drawer.hidden = true; $('btn-gear').setAttribute('aria-expanded', 'false'); render(); toast('Demo reset');
   };
 
   // ---------- init ----------
+  setTheme(document.documentElement.dataset.theme === 'dark');
   AI.configure({ model: S.model, dryRun: S.dryRun !== false, endpoint: S.endpoint || AI.DEFAULT_ENDPOINT });
   endEl.value = S.endpoint || '';
   dryEl.checked = S.dryRun !== false;
@@ -504,6 +714,6 @@
   modelEl.value = S.model;
   const sk = sess((s) => s.getItem(KEYSTORE));
   if (sk) { keyEl.value = sk; keepEl.checked = true; AI.configure({ apiKey: sk }); }
-  const start = () => { if (!S.sel && S.stories[0]) S.sel = S.stories[0].id; render(); };
+  const start = () => { if (!S.sel && S.stories[0]) S.sel = S.stories[0].id; ui.enter = true; render(); document.body.classList.add('boot'); };
   if (window.PinLock) window.PinLock.boot(start); else start();
 })();

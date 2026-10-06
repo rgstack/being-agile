@@ -106,7 +106,7 @@
     entry = '';
     el.innerHTML =
       '<div class="lock-card" role="dialog" aria-modal="true" aria-label="Unlock Being Agile">' +
-      '<div class="brand"><span class="dot"></span>Being Agile</div>' +
+      '<div class="brand"><span class="marks" aria-hidden="true"><i class="mark"></i><i class="mark" data-v="partial"></i><i class="mark" data-v="proven"></i></span>Being Agile</div>' +
       '<p class="lead">Enter your app PIN to unlock</p>' +
       '<div id="pin-dots" class="pin-dots" aria-hidden="true"></div>' +
       '<div class="pin-pad">' +
@@ -115,7 +115,7 @@
       '<button type="button" class="pin-key" data-k="0">0</button>' +
       '<button type="button" class="pin-key" data-k="B" aria-label="Backspace">⌫</button>' +
       '</div>' +
-      '<button type="button" id="pin-go" class="primary">Unlock</button>' +
+      '<button type="button" id="pin-go" class="btn">Unlock</button>' +
       '<p id="pin-err" class="pin-err" role="alert"></p></div>';
     el.hidden = false;
     paint();
@@ -192,23 +192,23 @@
   function renderSettings() {
     const host = $('pin-settings');
     if (!host) return;
-    const f = (id, label) => '<label class="fld">' + label + '<input id="' + id + '" type="password" inputmode="numeric" autocomplete="off" spellcheck="false"></label>';
+    const f = (id, label) => '<label class="fld">' + label + '<input id="' + id + '" class="in" type="password" inputmode="numeric" autocomplete="off" spellcheck="false"></label>';
     const msg = '<p id="pin-msg" class="pin-msg" role="status"></p>';
     const hint = '<p class="hint">Forgot the PIN? Clear this site’s browser storage to remove it (your saved demo data goes with it).</p>';
     if (!isSet()) {
       host.innerHTML =
         '<p class="pin-status">No PIN set — anyone with this link can open the app.</p>' +
         f('pin-new', 'New PIN') + f('pin-new2', 'Confirm PIN') +
-        '<button type="button" id="pin-set" class="primary">Set PIN</button>' + msg +
+        '<button type="button" id="pin-set" class="btn">Set PIN</button>' + msg +
         '<p class="hint">4 or more digits. Only a SHA-256 hash is stored on this device; the PIN itself is never saved or logged.</p>' + hint;
     } else {
       host.innerHTML =
         '<p class="pin-status">App PIN is set.</p>' +
-        '<button type="button" id="pin-lock" class="ghost">Lock now</button>' +
+        '<button type="button" id="pin-lock" class="btn btn-q">Lock now</button>' +
         '<div class="pin-form"><h4>Change PIN</h4>' + f('pin-cur', 'Current PIN') + f('pin-new', 'New PIN') + f('pin-new2', 'Confirm new PIN') +
-        '<button type="button" id="pin-change" class="primary">Change PIN</button></div>' +
+        '<button type="button" id="pin-change" class="btn">Change PIN</button></div>' +
         '<div class="pin-form"><h4>Remove PIN</h4>' + f('pin-cur-rm', 'Current PIN') +
-        '<button type="button" id="pin-remove" class="ghost">Remove PIN</button></div>' + msg +
+        '<button type="button" id="pin-remove" class="btn btn-q">Remove PIN</button></div>' + msg +
         '<p class="hint">Only a SHA-256 hash is stored on this device; the PIN itself is never saved or logged.</p>' + hint;
     }
     const val = (id) => ($(id) ? $(id).value : '');
