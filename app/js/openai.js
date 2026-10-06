@@ -28,9 +28,9 @@
   };
 
   const PROMPTS = {
-    stories: 'You are a senior product analyst. Given the PRD, design doc, API spec and supporting docs, produce substantial Jira stories as JSON: [{id, title, description, acceptance_criteria[7-8 items], subtasks[6 items], priority, labels}]. Cover every requirement. No prose outside the JSON.\n\nWrite every story against these rules:\n- INVEST: each story is Independent (buildable and testable on its own), Negotiable (detail open to conversation, not fixed like a contract), Valuable (a user or the business notices when it ships), Estimable (sizable without guessing), Small (fits comfortably inside one iteration), Testable (a clear pass/fail check proves it done).\n- Definition of Ready: the description states who wants what and why (As a... I want... so that...); acceptance criteria are written one per line and each is verifiable; the requirement(s) it covers are linked in labels as REQ-nnn; dependencies and open questions are named; priority is set.\n- Description follows As a / I want / So that. Acceptance criteria: 7-8 items, each a single verifiable check, demonstrated rather than asserted.',
+    stories: 'You are a senior product analyst. Given the PRD, design doc, API spec and supporting docs, produce substantial Jira stories as a JSON object: {"stories": [{id, title, description, acceptance_criteria[7-8 items], subtasks[6 items], priority, labels}]}. Cover every requirement. No prose outside the JSON.\n\nWrite every story against these rules:\n- INVEST: each story is Independent (buildable and testable on its own), Negotiable (detail open to conversation, not fixed like a contract), Valuable (a user or the business notices when it ships), Estimable (sizable without guessing), Small (fits comfortably inside one iteration), Testable (a clear pass/fail check proves it done).\n- Definition of Ready: the description states who wants what and why (As a... I want... so that...); acceptance criteria are written one per line and each is verifiable; the requirement(s) it covers are linked in labels as REQ-nnn; dependencies and open questions are named; priority is set.\n- Description follows As a / I want / So that. Acceptance criteria: 7-8 items, each a single verifiable check, demonstrated rather than asserted.',
     plan: 'Given the stories, produce a test plan as JSON: {objectives, scope_in, scope_out, approach, entry_criteria[], exit_criteria[], risks[]}.',
-    cases: 'Given the test plan and stories, produce test cases as JSON: [{id, requirement_ref, title, steps[], expected, priority}]. Cover all requirements. No prose outside the JSON.\n\nWrite every case against these rules:\n- One objective per case; the title says what it proves.\n- Preconditions stated: role, data, environment and configuration are named, not assumed.\n- Steps are clear and numbered; each step is a single action someone else could repeat exactly.\n- Expected result is unambiguous: specific values, codes and messages, so any two reviewers reach the same pass or fail.\n- Every case carries the REQ-nnn it proves in requirement_ref, so each requirement ends with a verdict.',
+    cases: 'Given the test plan and stories, produce test cases as a JSON object: {"test_cases": [{id, requirement_ref, title, steps[], expected, priority}]}. Cover all requirements. No prose outside the JSON.\n\nWrite every case against these rules:\n- One objective per case; the title says what it proves.\n- Preconditions stated: role, data, environment and configuration are named, not assumed.\n- Steps are clear and numbered; each step is a single action someone else could repeat exactly.\n- Expected result is unambiguous: specific values, codes and messages, so any two reviewers reach the same pass or fail.\n- Every case carries the REQ-nnn it proves in requirement_ref, so each requirement ends with a verdict.',
     assist: 'You are a senior product analyst and test strategist. The user is drafting a Jira story, a test plan, or a test case and asks for help improving one item. You receive the item kind, its current text, and their request. Reply in concise markdown with specific, actionable suggestions grounded in the item\'s actual content. Judge it against INVEST (for stories), the Definition of Ready, and the test-case quality rules (one objective, stated preconditions, repeatable numbered steps, unambiguous expected result, REQ-nnn traceability) wherever they apply. If the request asks for a rewrite or an improved version, include it in a fenced code block after the suggestions. Be concrete — quote the weak lines and show the fix.',
   };
 
@@ -146,6 +146,20 @@
     return { data, pt: u.prompt_tokens || 0, ct: u.completion_tokens || 0 };
   }
 
+  // json_object mode forces the model to return a JSON object, so the prompts above
+  // ask for {"stories":[...]} / {"test_cases":[...]}. Normalize defensively anyway:
+  // accept a bare array (dry-run samples) or any single-key object holding the array.
+  function extractArray(op, data) {
+    if (Array.isArray(data)) return data;
+    if (data && typeof data === 'object') {
+      const KEYS = { stories: ['stories', 'user_stories', 'jira_stories'], cases: ['test_cases', 'cases', 'tests'] };
+      for (const k of (KEYS[op] || [])) if (Array.isArray(data[k])) return data[k];
+      const vals = Object.values(data);
+      if (vals.length === 1 && Array.isArray(vals[0])) return vals[0];
+    }
+    throw new Error('Model returned an unexpected shape for ' + op + ' (expected a JSON array). Retry — or switch to dry-run.');
+  }
+
   async function run(op, input) {
     const est = estimateCall(op, input);
     const warning = checkBudget(op, est);
@@ -158,6 +172,7 @@
     } else {
       ({ data, pt, ct } = await liveCall(op, input));
     }
+    if (op === 'stories' || op === 'cases') data = extractArray(op, data);
     const rec = { operation: op, model: cfg.model, prompt_tokens: pt, completion_tokens: ct, est_usd: usd(cfg.model, pt, ct), at: Date.now(), dry_run: cfg.dryRun };
     calls.push(rec);
     listeners.forEach((f) => f(getUsage()));
