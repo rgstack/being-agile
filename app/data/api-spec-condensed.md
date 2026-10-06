@@ -1,0 +1,30 @@
+# API Spec (condensed) — Provider Lookup & NPI Verification
+Part A: upstream CMS NPPES NPI Registry API v2.1 (probed live 2026-10-05). Part B: our internal REST API. Full text: api-spec.md.
+
+## A.1 Endpoint
+GET https://npiregistry.cms.hhs.gov/api/?version=2.1&<params> — public, no auth, HTTPS only. version is REQUIRED (missing/unknown -> error 17 "Unsupported Version", observed). application/json; Cache-Control: no-cache, no-store, must-revalidate (we cache ourselves). No rate-limit headers observed; no published quota.
+
+## A.2 Parameters
+version=2.1 (always). number: 10-digit NPI exact match — NPPES does NOT validate the check digit (Luhn-invalid 10-digit -> result_count:0, not an error); non-10-digit -> error 06. enumeration_type: NPI-1 | NPI-2 (else 05). taxonomy_description, first_name, last_name (NPI-1; trailing * wildcard), organization_name (NPI-2; * wildcard; matches DBA names), city (matched address purpose unverified), state (2-letter; CANNOT be sole criterion -> 07), postal_code (5 or 9 digits), limit (default 10, max 200 — larger silently clamped to 200, observed), skip (offset; cap 1000). Wildcards: trailing * only, requires >=2 leading chars (else 03, observed with "s*"). Names case-insensitive. Parameters ANDed; no OR/negation/sort/total.
+
+## A.3 Responses
+Success: {"result_count": <page size, NOT total>, "results": [provider]}. result_count:0 + [] = no match (not an error).
+NPI-1 provider: number, enumeration_type, created_epoch/last_updated_epoch (STRING ms), basic{first_name, middle_name, last_name, credential, sex, enumeration_date, last_updated, certification_date, sole_proprietor, status ("A"=active)}, other_names[] (type/code/names), addresses[] (address_purpose MAILING|LOCATION, address_1/2, city, state, postal_code unhyphenated 5-or-9-digit, country_code, telephone_number), taxonomies[] (code, desc, primary bool, state, license), identifiers[], endpoints[], practiceLocations[].
+NPI-2 differences: basic has organization_name, organizational_subpart, authorized official fields; other_names type "Doing Business As".
+Field rules: postal_code -> display ZIP+4, compare first 5 digits (9 if expected ZIP is 9); exactly one primary:true else anomaly flag; "--" -> empty; epochs are strings (parse to int ms); numeric-like fields stay strings (leading zeros); names uppercase (compare case-insensitive); empty arrays -> hide section; unknown fields ignored, raw payload kept for snapshots.
+
+## A.4 Errors: HTTP 200 + Errors[] IS failure
+{"Errors":[{"description","field","number"}]} — no results key. 03 (e.g. last_name): "Enter at least two letters before the *." 05 (enumeration_type): "Provider type must be Individual or Organization." 06 (number): "An NPI is exactly 10 digits." 07 (state): "Add a name, city, ZIP, or specialty — state alone is too broad." 17 (version): internal misconfiguration, page on-call. Unknown codes: generic message + description logged. Transport (timeout/reset/5xx): retry with backoff.
+
+## A.5 Etiquette (stricter than any expected limit)
+Server-side only, never browsers. <=5 req/s global (burst 5), <=4 concurrent, configurable. Single-flight identical concurrent requests. Cache 24h NPI / 1h search / 15min negative. Retry idempotent GETs <=3 (500ms->1s->2s +/-25% jitter); never retry Errors. Breaker: 5 consecutive transport failures or >50%/30s (>=10 reqs); half-open probe/30s. Batch = low priority + daily budget. Descriptive User-Agent with contact mailbox. Never skip>1000.
+
+## B. Internal API — /api/v1, JSON, OIDC, X-Request-Id, uniform error envelope
+400 validation · 401/403 auth · 404 NPI_NOT_FOUND · 429 per-user limit (Retry-After) · 502 bad upstream output · 503 upstream unavailable (retryable:true).
+B.1 GET /providers/{npi} (Viewer+): normalized provider — npi, type INDIVIDUAL|ORGANIZATION, status ACTIVE|DEACTIVATED|UNKNOWN(raw), name{first,middle,last,credential}, primaryTaxonomy{code,description,license,state}, taxonomies[], locationAddress vs mailingAddress (separate), otherNames[], soleProprietor, identifiers/endpoints/practiceLocations, nppes{enumerationDate,lastUpdated}, provenance{source,retrievedAt,cache HIT|MISS|STALE|BYPASS}. ?refresh=true (Verifier+) bypasses cache. Errors: 400 NPI_FORMAT_INVALID / NPI_CHECK_DIGIT_INVALID, 404, 503.
+B.2 GET /providers (Viewer+): search; params type, firstName, lastName, organizationName, taxonomy, city, state, postalCode, pageSize (10|25|50|100|200, default 25), page (1-based; skip=(page-1)*pageSize). Validation: >=1 criterion besides state; wildcard rule; page*pageSize<=1000 else 400 PAGING_DEPTH_EXCEEDED. 200: {items[{npi,type,displayName,primaryTaxonomy,city,state,status,lastUpdated}], page, pageSize, hasMore (true iff full page — deliberately NO total), provenance}.
+B.3 POST /verifications (Verifier+): {npi, expected{type?, firstName, lastName, credential?, primaryTaxonomyCode?, practiceState?, practiceZip?}} -> ALWAYS fresh NPPES fetch -> 201 {verificationId, verdict VERIFIED|REVIEW|FAILED, reason (NPI_NOT_FOUND|NPI_DEACTIVATED|TYPE_MISMATCH), fields{name,credential,taxonomy,location: {result MATCH|MISMATCH|NOT_PROVIDED, expected, actual, matchedOn, note}}, snapshotId, nppes{lastUpdated,status}, retrievedAt}. Verdict: FAILED if not found / status!=A / type mismatch; else REVIEW if any MISMATCH; else VERIFIED. GET /verifications/{id}; export ?format=pdf|json.
+B.4 POST /batches (Verifier+, Phase 2): multipart CSV <=500 rows/<=1MB/UTF-8; header npi,first_name,last_name,credential,taxonomy_code,state,zip -> 202 {batchId, accepted, rejected[{row,code}]}. GET /batches/{id}: QUEUED|RUNNING|COMPLETE|CANCELLED|FAILED + processed/total + counts. DELETE cancels. GET results.csv (formula-injection-safe). Transport failures -> ERROR (retryable), never FAILED.
+B.5 GET /audit (Auditor+): filters user/action/npi/from/to; cursor pagination (limit<=200); export.csv; read-only.
+B.6 Ops: /healthz, /readyz (NPPES outage affects detail, not readiness), /metrics (internal).
+B.7 Check digit: Luhn on "80840"+NPI; valid iff sum%10==0. Known-valid example: 1234567893.
