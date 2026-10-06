@@ -81,7 +81,9 @@
       d.extras.map((x, i) => docCard('x', 'Supporting doc ' + (i + 1), x, i)).join('') + '</div>' +
       '<div class="bar"><button class="ghost" data-a="add-extra">+ Add another document</button><button class="ghost" data-a="load-sample">Load NPPES sample</button><span class="grow"></span>' +
       '<button class="primary" data-a="gen-stories"' + (has && !ui.busy ? '' : ' disabled') + '>' + (ui.busy ? 'Generating…' : 'Generate stories →') + '</button></div>' +
-      (ui.error ? '<div class="err">' + esc(ui.error) + '</div>' : '');
+      (ui.error ? '<div class="err">' + esc(ui.error) + '</div>' : '') +
+      '<h3>Sample documents</h3><p class="hint">Download, then import above via the document slots.</p>' +
+      '<div class="bar samples"><a class="ghost" href="data/prd.md" download>Sample PRD</a><a class="ghost" href="data/design.md" download>Sample design doc</a><a class="ghost" href="data/api-spec.md" download>Sample API spec</a></div>';
   }
 
   // ---------- 2. Stories ----------
