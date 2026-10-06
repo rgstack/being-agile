@@ -25,7 +25,12 @@
     <input id="set-key" type="password" autocomplete="off" spellcheck="false" placeholder="Not needed in dry-run">
   </label>
   <label class="chk"><input id="set-keep" type="checkbox"> Remember key for this session</label>
-  <p class="hint warn-text">Key is stored in this browser session only. It is never written to localStorage, exports or logs.</p>
+  <p class="hint warn-text">Key is stored in this browser session only. It is never written to localStorage, exports or logs. Optional when a custom endpoint/proxy is used.</p>
+  <label class="fld">API endpoint
+    <input id="set-endpoint" type="url" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1/chat/completions">
+  </label>
+  <p id="set-endpoint-err" class="hint warn-text" hidden></p>
+  <p class="hint">Default calls OpenAI directly. For a corporate proxy, paste its chat-completions URL — the API key then becomes optional.</p>
   <label class="fld">Model
     <select id="set-model"></select>
   </label>

@@ -33,7 +33,7 @@
     const ok = await confirmBox(title,
       '<p>This will use <b>~' + est.tokens.toLocaleString() + ' tokens</b>, est. <b>' + fmtUsd(est.usd) + '</b> (' + esc(est.model) + ').</p>' +
       '<p class="hint">Input ~' + est.inputTokens.toLocaleString() + ' (cap ' + est.capIn.toLocaleString() + ') · output ~' + est.outputTokens.toLocaleString() + ' (cap ' + est.capOut.toLocaleString() + ')</p>' +
-      (cfg.dryRun ? '<p class="hint">Dry-run: simulated response, nothing is sent and nothing is spent.</p>' : '') +
+      (cfg.dryRun ? '<p class="hint">Dry-run: simulated response, nothing is sent and nothing is spent.</p>' : '<p>Live call target: <b>' + esc(est.endpointHost) + '</b></p>') +
       (est.overCap ? '<p class="note">Input is over the budget cap. ' + (cfg.dryRun ? 'A live call would abort; dry-run continues.' : 'This call will be aborted.') + '</p>' : ''), 'Confirm');
     if (!ok) return;
     ui.busy = true; ui.error = ''; render();
@@ -333,6 +333,13 @@
   document.getElementById('btn-drawer-close').onclick = () => { drawer.hidden = true; };
   const dryEl = document.getElementById('set-dry');
   dryEl.onchange = () => { S.dryRun = dryEl.checked; AI.configure({ dryRun: S.dryRun }); ST.save(); render(); };
+  const endEl = document.getElementById('set-endpoint'), endErr = document.getElementById('set-endpoint-err');
+  endEl.oninput = () => {
+    const v = endEl.value.trim(), ok = !v || /^https:\/\//i.test(v);
+    endErr.hidden = ok; endErr.textContent = ok ? '' : 'Endpoint must start with https:// (leave empty for the OpenAI default). Not saved.';
+    if (!ok) return;
+    S.endpoint = v; AI.configure({ endpoint: v || AI.DEFAULT_ENDPOINT }); ST.save();
+  };
   modelEl.onchange = () => { S.model = modelEl.value; AI.configure({ model: S.model }); ST.save(); render(); };
   const KEYSTORE = 'being-agile-session-key'; // sessionStorage only, opt-in; never localStorage
   const sess = (fn) => { try { return fn(sessionStorage); } catch (e) { return null; } };
@@ -344,7 +351,8 @@
   };
 
   // ---------- init ----------
-  AI.configure({ model: S.model, dryRun: S.dryRun !== false });
+  AI.configure({ model: S.model, dryRun: S.dryRun !== false, endpoint: S.endpoint || AI.DEFAULT_ENDPOINT });
+  endEl.value = S.endpoint || '';
   dryEl.checked = S.dryRun !== false;
   AI.loadUsage(S.usage);
   modelEl.value = S.model;

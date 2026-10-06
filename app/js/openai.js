@@ -1,6 +1,7 @@
 /* OpenAI adapter — BYOK, token budgets, usage metering, dry-run + live JSON-mode path.
    Dry-run (default): bundled sample output, zero network. Live (dryRun off): liveCall() POSTs one
-   chat-completions request (response_format json_object, output capped by BUDGETS) to api.openai.com,
+   chat-completions request (response_format json_object, output capped by BUDGETS) to cfg.endpoint
+   (api.openai.com by default, or a corporate proxy that injects auth — then the key is optional),
    parses the JSON reply and records the REAL usage from the response into metering.
    liveCall is the only network code in the app. The API key lives only in this closure and is
    never logged or committed. */
@@ -28,7 +29,8 @@
     cases: 'Given the test plan and stories, produce test cases as JSON: [{id, requirement_ref, title, steps[], expected, priority}]. Cover all requirements.',
   };
 
-  let cfg = { apiKey: '', model: 'gpt-4o-mini', dryRun: true };
+  const DEFAULT_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
+  let cfg = { apiKey: '', model: 'gpt-4o-mini', dryRun: true, endpoint: DEFAULT_ENDPOINT };
   const calls = [];
   const listeners = [];
 
@@ -39,8 +41,10 @@
     if (typeof o.apiKey === 'string') cfg.apiKey = o.apiKey;
     if (o.model && PRICING[o.model]) cfg.model = o.model;
     if (typeof o.dryRun === 'boolean') cfg.dryRun = o.dryRun;
+    if (typeof o.endpoint === 'string') cfg.endpoint = o.endpoint || DEFAULT_ENDPOINT;
   }
-  const getConfig = () => ({ model: cfg.model, dryRun: cfg.dryRun, hasKey: !!cfg.apiKey }); // never exposes the key
+  const getConfig = () => ({ model: cfg.model, dryRun: cfg.dryRun, hasKey: !!cfg.apiKey, endpoint: cfg.endpoint, isCustom: cfg.endpoint !== DEFAULT_ENDPOINT }); // never exposes the key
+  const hostOf = (u) => { try { return new URL(u).hostname; } catch (e) { return u; } };
 
   const estTokens = (v) => Math.ceil((typeof v === 'string' ? v : JSON.stringify(v) || '').length / 4);
   const usd = (model, pt, ct) => {
@@ -74,6 +78,7 @@
     return {
       operation: op, model: cfg.model, tokens: inTok + outTok, inputTokens: inTok, outputTokens: outTok,
       usd: usd(cfg.model, inTok, outTok), capIn: b.in, capOut: b.out, overCap: inTok > b.in,
+      endpoint: cfg.endpoint, endpointHost: hostOf(cfg.endpoint),
     };
   }
 
@@ -87,20 +92,22 @@
 
   // LIVE: one JSON-mode chat completion. Returns {data, pt, ct} with real usage from the API.
   async function liveCall(op, input) {
-    if (!cfg.apiKey) throw new Error('No API key. Enter your OpenAI API key in Settings (gear icon).');
+    if (!cfg.apiKey && cfg.endpoint === DEFAULT_ENDPOINT) throw new Error('No API key. Enter your OpenAI API key in Settings (gear icon).');
     const body = {
       model: cfg.model,
       response_format: { type: 'json_object' },
       messages: [{ role: 'system', content: PROMPTS[op] }, { role: 'user', content: inputFor(op, input) }],
     };
     body[cfg.model.indexOf('o3') === 0 ? 'max_completion_tokens' : 'max_tokens'] = BUDGETS[op].out;
+    const headers = { 'Content-Type': 'application/json' };
+    if (cfg.apiKey) headers.Authorization = 'Bearer ' + cfg.apiKey; // custom proxy without a key injects auth itself
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 120000);
     let res;
     try {
-      res = await fetch('https://api.openai.com/v1/chat/completions', {
+      res = await fetch(cfg.endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.apiKey },
+        headers,
         body: JSON.stringify(body),
         signal: ctl.signal,
       });
@@ -114,7 +121,7 @@
       if (res.status === 401) throw new Error('401 Unauthorized — check your API key in Settings.');
       if (res.status === 403) throw new Error('403 Forbidden — ' + (detail || 'your key may lack access to this model or project.'));
       if (res.status === 429) throw new Error('429 Rate limited — wait a moment and retry.');
-      throw new Error('OpenAI error ' + res.status + ': ' + (detail || res.statusText || 'unknown'));
+      throw new Error('API error ' + res.status + ': ' + (detail || res.statusText || 'unknown'));
     }
     let json, data;
     try {
@@ -166,5 +173,5 @@
   const loadUsage = (saved) => { calls.length = 0; (saved || []).forEach((c) => calls.push(c)); };
   const onUsage = (f) => listeners.push(f);
 
-  window.OpenAI = { PRICING, MODELS, BUDGETS, PROMPTS, BudgetError, configure, getConfig, estimateCall, generateStories, generateTestPlan, generateTestCases, assist, getUsage, loadUsage, onUsage };
+  window.OpenAI = { DEFAULT_ENDPOINT, PRICING, MODELS, BUDGETS, PROMPTS, BudgetError, configure, getConfig, estimateCall, generateStories, generateTestPlan, generateTestCases, assist, getUsage, loadUsage, onUsage };
 })();

@@ -16,6 +16,7 @@
     sel: null,              // selected story id
     model: 'gpt-4o-mini',
     dryRun: true,
+    endpoint: '',           // '' = default OpenAI endpoint; otherwise a proxy chat-completions URL
     usage: [],
   });
 
