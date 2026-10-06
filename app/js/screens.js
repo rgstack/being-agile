@@ -308,11 +308,15 @@
   }
   function assistBox(sec) {
     const a = ui.assist[sec] || {};
-    return '<div class="assist" ' + (a.open ? '' : 'hidden') + '><div class="ai-box"><span class="ai-tag">AI</span><input data-i="assist-prompt" data-k="' + sec + '" placeholder="Ask AI to improve this…" aria-label="Ask AI to improve ' + sec + '" value="' + esc(a.prompt || '') + '"><button class="ai-go" data-a="assist" data-k="' + sec + '">Ask</button></div>' +
+    return '<div class="assist" ' + (a.open ? '' : 'hidden') + '><div class="ai-box"><span class="ai-tag">AI</span><input data-i="assist-prompt" data-k="' + sec + '" placeholder="Ask AI to improve this…" aria-label="Ask AI to improve ' + displayKind(sec) + '" value="' + esc(a.prompt || '') + '"><button class="ai-go" data-a="assist" data-k="' + sec + '">Ask</button></div>' +
       (a.out ? '<div class="ai-prop"><div class="body md">' + MD.render(a.out) + '</div></div>' : '') + '</div>';
   }
   const aiLink = (sec) => '<button class="ai-link" data-a="assist-toggle" data-k="' + sec + '" aria-expanded="' + !!(ui.assist[sec] || {}).open + '">AI assist</button>';
-  // Current draft text behind an assist box, so the model reacts to what's actually written.
+  // 'case 0' -> 'case 1' for anything the user reads; keys stay zero-indexed.
+  function displayKind(k) {
+    const m = /^case (\d+)$/.exec(k || '');
+    return m ? 'case ' + (+m[1] + 1) : k;
+  }
   function assistContext(k) {
     if (k === 'test plan') {
       const p = S.draft.plan; if (!p) return '';
@@ -624,7 +628,7 @@
     assist: async (el) => {
       const k = el.dataset.k, a = ui.assist[k];
       a.out = 'Thinking…'; render();
-      try { a.out = await AI.assist(k, a.prompt, assistContext(k)); }
+      try { a.out = await AI.assist(displayKind(k), a.prompt, assistContext(k)); }
       catch (e) { a.out = '**Assist failed:** ' + ((e && e.message) || e); }
       render();
     },
