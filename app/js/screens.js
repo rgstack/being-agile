@@ -743,7 +743,7 @@
   nav.addEventListener('click', (e) => { const b = e.target.closest('[data-step]'); if (b) go(+b.dataset.step); });
 
   // ---------- settings drawer ----------
-  const drawer = $('drawer'), keyEl = $('set-key'), keepEl = $('set-keep'), modelEl = $('set-model');
+  const drawer = $('drawer'), keyEl = $('set-key'), modelEl = $('set-model');
   modelEl.innerHTML = AI.MODELS.map((m) => '<option>' + m + '</option>').join('');
   $('btn-gear').onclick = () => { drawer.hidden = !drawer.hidden; $('btn-gear').setAttribute('aria-expanded', String(!drawer.hidden)); if (!drawer.hidden && window.PinLock) window.PinLock.renderSettings(); };
   $('btn-drawer-close').onclick = () => { drawer.hidden = true; $('btn-gear').setAttribute('aria-expanded', 'false'); };
@@ -757,13 +757,12 @@
     S.endpoint = v; AI.configure({ endpoint: v || AI.DEFAULT_ENDPOINT }); ST.save();
   };
   modelEl.onchange = () => { S.model = modelEl.value; AI.configure({ model: S.model }); ST.save(); render(); };
-  const KEYSTORE = 'being-agile-session-key'; // sessionStorage only, opt-in; never localStorage
-  const sess = (fn) => { try { return fn(sessionStorage); } catch (e) { return null; } };
-  keyEl.oninput = () => { AI.configure({ apiKey: keyEl.value }); if (keepEl.checked) sess((s) => s.setItem(KEYSTORE, keyEl.value)); };
-  keepEl.onchange = () => { sess((s) => (keepEl.checked ? s.setItem(KEYSTORE, keyEl.value) : s.removeItem(KEYSTORE))); };
+  const KEYSTORE = 'being-agile-api-key'; // localStorage, per Rajan's call Oct 6 2026: his key, his risk; clear via field or Reset demo
+  const store = (fn) => { try { return fn(localStorage); } catch (e) { return null; } };
+  keyEl.oninput = () => { const v = keyEl.value; AI.configure({ apiKey: v }); store((s) => (v ? s.setItem(KEYSTORE, v) : s.removeItem(KEYSTORE))); };
   $('btn-reset').onclick = async () => {
     if (!(await confirmBox('Reset demo?', '<p>This clears all saved documents, stories, plan, cases and results from this browser.</p>', 'Reset'))) return;
-    S = ST.reset(); AI.loadUsage([]); ui.assist = {}; ui.paste = {}; ui.write = {}; ui.subEdit = null; ui.error = ''; ui.trace = null; ui.open = new Set(); ui.runOpen = new Set(); closeSheet(); drawer.hidden = true; $('btn-gear').setAttribute('aria-expanded', 'false'); render(); toast('Demo reset');
+    S = ST.reset(); AI.loadUsage([]); ui.assist = {}; ui.paste = {}; ui.write = {}; ui.subEdit = null; ui.error = ''; ui.trace = null; ui.open = new Set(); ui.runOpen = new Set(); closeSheet(); drawer.hidden = true; $('btn-gear').setAttribute('aria-expanded', 'false'); store((s) => s.removeItem(KEYSTORE)); keyEl.value = ''; AI.configure({ apiKey: '' }); render(); toast('Demo reset');
   };
 
   // ---------- init ----------
@@ -773,8 +772,8 @@
   dryEl.checked = S.dryRun !== false;
   AI.loadUsage(S.usage);
   modelEl.value = S.model;
-  const sk = sess((s) => s.getItem(KEYSTORE));
-  if (sk) { keyEl.value = sk; keepEl.checked = true; AI.configure({ apiKey: sk }); }
+  const sk = store((s) => s.getItem(KEYSTORE));
+  if (sk) { keyEl.value = sk; AI.configure({ apiKey: sk }); }
   const start = () => { if (!S.sel && S.stories[0]) S.sel = S.stories[0].id; ui.enter = true; render(); document.body.classList.add('boot'); };
   if (window.PinLock) window.PinLock.boot(start); else start();
 })();

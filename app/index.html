@@ -7,7 +7,7 @@
 <title>Being Agile · Proof not promises (working prototype)</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 16'%3E%3Ccircle cx='7' cy='8' r='5.6' fill='none' stroke='%2369736e' stroke-width='1.8'/%3E%3Ccircle cx='22' cy='8' r='5.6' fill='none' stroke='%230b7a57' stroke-width='1.8'/%3E%3Cpath d='M22 2.4a5.6 5.6 0 0 0 0 11.2z' fill='%230b7a57'/%3E%3Ccircle cx='37' cy='8' r='6.5' fill='%230b7a57'/%3E%3C/svg%3E">
 <script>try{if(localStorage.getItem('being-agile-theme')==='dark')document.documentElement.dataset.theme='dark';}catch(e){}</script>
-<link rel="stylesheet" href="css/main.css?v=10">
+<link rel="stylesheet" href="css/main.css?v=11">
 </head>
 <body>
 <div class="app">
@@ -41,10 +41,9 @@
   <div class="drawer-head"><h2>Settings</h2><button id="btn-drawer-close" class="icon-btn" aria-label="Close"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
   <div class="drawer-body">
     <label class="fld">OpenAI API key
-      <input id="set-key" class="in" type="password" autocomplete="off" spellcheck="false" placeholder="Not needed in dry-run">
+      <input id="set-key" class="in" type="password" autocomplete="off" spellcheck="false" placeholder="Stored in this browser">
     </label>
-    <label class="chk"><input id="set-keep" type="checkbox"> Remember key for this session</label>
-    <p class="hint warn-text">Key is stored in this browser session only. It is never written to localStorage, exports or logs. Optional when a custom endpoint/proxy is used.</p>
+    <p class="hint warn-text">Key is stored in this browser's local storage so it survives reloads. It is never committed to the repo, exported, or logged — it is only sent to the configured API endpoint. Clear it by emptying the field or with Reset demo.</p>
     <label class="fld">API endpoint
       <input id="set-endpoint" class="in" type="url" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1/chat/completions">
     </label>
@@ -68,17 +67,17 @@
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="lock" class="lock" hidden></div>
 
-<script src="js/sample-data.js?v=10"></script>
-<script src="js/openai.js?v=10"></script>
-<script src="js/state.js?v=10"></script>
-<script src="js/csv.js?v=10"></script>
-<script src="js/pin.js?v=10"></script>
+<script src="js/sample-data.js?v=11"></script>
+<script src="js/openai.js?v=11"></script>
+<script src="js/state.js?v=11"></script>
+<script src="js/csv.js?v=11"></script>
+<script src="js/pin.js?v=11"></script>
 <script src="js/vendor/marked.js"></script>
 <script src="js/vendor/dompurify.js"></script>
 <!-- mermaid via CDN, deferred so a slow CDN never blocks app boot (markdown.js waits for it at diagram-paint time) -->
 <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-<script src="js/markdown.js?v=10"></script>
-<script src="js/rules.js?v=10"></script>
-<script src="js/screens.js?v=10"></script>
+<script src="js/markdown.js?v=11"></script>
+<script src="js/rules.js?v=11"></script>
+<script src="js/screens.js?v=11"></script>
 </body>
 </html>
