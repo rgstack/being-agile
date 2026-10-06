@@ -289,12 +289,12 @@
     return head('Start with your source documents', dry
       ? 'Add the PRD, design doc and API spec (plus any supporting docs). Nothing leaves your browser in Phase 1 — generation is simulated (dry-run).'
       : 'Add the PRD, design doc and API spec (plus any supporting docs). <b>Live mode:</b> calls OpenAI with your key. Sample docs are condensed to control cost — full text in dry-run.') +
-      '<p class="ext-note"><b>External service:</b> Being Agile runs outside your organization\u2019s infrastructure \u2014 unlike OneDrive or SharePoint, files you load here are not inside your company systems. When you generate or use AI assist, document text may be sent to <b>' + esc(apiHost()) + '</b>. Don\u2019t upload sensitive information or anything you are not authorized to share.</p>' +
       '<ul class="docs">' + docRow('prd', 'PRD', d.prd) + docRow('design', 'Design doc', d.design) + docRow('api', 'API spec', d.api) + '</ul>' +
       (d.extras.length ? '<h2 class="group">Supporting documents</h2><ul class="docs">' + d.extras.map((x, i) => docRow('x', 'Supporting doc ' + (i + 1), x, i)).join('') + '</ul>' : '') +
       '<div class="bar" style="margin-top:14px">' + (UPLOADS_ENABLED ? '<button class="add-doc" data-a="add-extra" style="margin-top:0">' + ic('plus') + 'Add another document</button><span class="sp"></span>' : '') + '<button class="btn btn-q btn-s" data-a="load-sample">Load NPPES sample</button></div>' +
       errBox() + nextRow() +
-      '<p class="how"><b>How this works.</b> AI drafts → you edit → you save. ' + (UPLOADS_ENABLED ? 'Drop a file on any row, browse for one, or paste text.' : 'Load the NPPES sample below, or paste text into any row.') + '</p>';
+      '<p class="how"><b>How this works.</b> AI drafts → you edit → you save. ' + (UPLOADS_ENABLED ? 'Drop a file on any row, browse for one, or paste text.' : 'Load the NPPES sample below, or paste text into any row.') + '</p>' +
+      '<p class="ext-note"><b>External service:</b> Being Agile runs outside your organization\u2019s infrastructure \u2014 files you load here are not inside your company systems. When you generate or use AI assist, document text may be sent to <b>' + esc(apiHost()) + '</b>. Don\u2019t upload sensitive information or anything you are not authorized to share.</p>';
   }
 
   // ---------- 2. Stories ----------
