@@ -314,6 +314,7 @@
   function assistBox(sec) {
     const a = ui.assist[sec] || {};
     return '<div class="assist" ' + (a.open ? '' : 'hidden') + '><div class="ai-box"><span class="ai-tag">AI</span><input data-i="assist-prompt" data-k="' + sec + '" placeholder="Ask AI to improve this…" aria-label="Ask AI to improve ' + displayKind(sec) + '" value="' + esc(a.prompt || '') + '"><button class="ai-go" data-a="assist" data-k="' + sec + '">Ask</button></div>' +
+      '<div class="ai-hint">Don\u2019t include sensitive information in your request \u2014 it goes to the AI service.</div>' +
       (a.out ? '<div class="ai-prop"><div class="body md">' + MD.render(a.out) + '</div></div>' : '') + '</div>';
   }
   const aiLink = (sec) => '<button class="ai-link" data-a="assist-toggle" data-k="' + sec + '" aria-expanded="' + !!(ui.assist[sec] || {}).open + '">AI assist</button>';

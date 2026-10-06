@@ -132,6 +132,7 @@ a { color: inherit; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.25; }
 .brand-tag { font-size: 11px; font-weight: 450; letter-spacing: .01em; color: var(--ink-3); }
 .ext-note { color: var(--bad); font-size: 13px; line-height: 1.45; margin: 10px 0 0; max-width: 76ch; }
+.ai-hint { font-size: 11.5px; color: var(--bad); margin: 6px 2px 0; }
 .brand .marks { display: inline-flex; gap: 3px; }
 .brand .mark { --s: 11px; vertical-align: 0; }
 
