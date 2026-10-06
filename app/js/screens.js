@@ -311,11 +311,15 @@
     const order = { phase: 0, area: 1, req: 2 };
     return labels.slice().sort((a, b) => order[catKind(a)] - order[catKind(b)]).map((l) => (catKind(l) === 'req' ? reqChip(l.toUpperCase()) : '<span class="label">' + esc(l) + '</span>')).join('');
   }
+  // Apply is offered only where the assist box maps to a single editable field.
+  const APPLYABLE = { 'description': 'desc', 'acceptance criteria': 'ac' };
+  // Prefer the fenced code block (the AI's rewrite) over the full reply.
+  function applyText(md) { const m = /```(?:[a-zA-Z0-9_-]*\n)?([\s\S]*?)```/.exec(md || ''); return (m ? m[1] : (md || '')).trim(); }
   function assistBox(sec) {
     const a = ui.assist[sec] || {};
     return '<div class="assist" ' + (a.open ? '' : 'hidden') + '><div class="ai-box"><span class="ai-tag">AI</span><input data-i="assist-prompt" data-k="' + sec + '" placeholder="Ask AI to improve this…" aria-label="Ask AI to improve ' + displayKind(sec) + '" value="' + esc(a.prompt || '') + '"><button class="ai-go" data-a="assist" data-k="' + sec + '">Ask</button></div>' +
       '<div class="ai-hint">Don\u2019t include sensitive information in your request \u2014 it goes to the AI service.</div>' +
-      (a.out ? '<div class="ai-prop"><div class="body md">' + MD.render(a.out) + '</div></div>' : '') + '</div>';
+      (a.out ? '<div class="ai-prop"><div class="body md">' + MD.render(a.out) + '</div>' + (a.ok && APPLYABLE[sec] ? '<button class="btn btn-s" data-a="assist-apply" data-k="' + sec + '" title="Replace this field with the AI response (uses the fenced code block if the AI included one)">Apply</button>' : '') + '</div>' : '') + '</div>';
   }
   const aiLink = (sec) => '<button class="ai-link" data-a="assist-toggle" data-k="' + sec + '" aria-expanded="' + !!(ui.assist[sec] || {}).open + '">AI assist</button>';
   // 'case 0' -> 'case 1' for anything the user reads; keys stay zero-indexed.
@@ -573,6 +577,9 @@
   }
 
   // ---------- actions ----------
+  // Story-section assist boxes are keyed by section, not by story — clear them on
+  // story switch so one story's AI output never lingers on another story.
+  const clearStoryAssist = () => { delete ui.assist['description']; delete ui.assist['acceptance criteria']; delete ui.assist['subtasks']; };
   const A = {
     'open-doc': (el) => openDocSheet(docRef(el.dataset.k), el.dataset.label, el.dataset.k),
     'sheet-close': closeSheet,
@@ -607,10 +614,10 @@
     'csv-plan': () => { cleanDraft(); toast('Downloaded ' + CSV.download('test-plan', CSV.planToCsv(S.draft.plan))); },
     'csv-cases': () => { cleanDraft(); toast('Downloaded ' + CSV.download('test-cases', CSV.casesToCsv(S.draft.cases))); },
     go: (el) => go(+el.dataset.k),
-    sel: (el) => { S.sel = el.dataset.k; ui.sheet = 'story'; ui.subEdit = null; ST.save(); ui.focus = '.card[data-k="' + el.dataset.k + '"]'; render(); },
+    sel: (el) => { S.sel = el.dataset.k; ui.sheet = 'story'; ui.subEdit = null; clearStoryAssist(); ST.save(); ui.focus = '.card[data-k="' + el.dataset.k + '"]'; render(); },
     'story-step': (el) => {
       const L = S.draft.stories || [], i = L.findIndex((s) => s.id === S.sel), n = L[i + +el.dataset.k];
-      if (n) { S.sel = n.id; ui.subEdit = null; ST.save(); render(); const c = view.querySelector('.card[aria-current="true"]'); if (c) c.scrollIntoView({ block: 'nearest' }); }
+      if (n) { S.sel = n.id; ui.subEdit = null; clearStoryAssist(); ST.save(); render(); const c = view.querySelector('.card[aria-current="true"]'); if (c) c.scrollIntoView({ block: 'nearest' }); }
     },
     'rt-tab': (el) => {
       const box = el.closest('.rt'), w = el.dataset.t === 'write';
@@ -633,10 +640,19 @@
     'assist-toggle': (el) => { const a = (ui.assist[el.dataset.k] = ui.assist[el.dataset.k] || {}); a.open = !a.open; ui.focus = '[data-i="assist-prompt"][data-k="' + el.dataset.k + '"]'; render(); },
     assist: async (el) => {
       const k = el.dataset.k, a = ui.assist[k];
-      a.out = 'Thinking…'; render();
-      try { a.out = await AI.assist(displayKind(k), a.prompt, assistContext(k)); }
-      catch (e) { a.out = '**Assist failed:** ' + ((e && e.message) || e); }
+      a.out = 'Thinking…'; a.ok = false; render();
+      try { a.out = await AI.assist(displayKind(k), a.prompt, assistContext(k)); a.ok = true; }
+      catch (e) { a.out = '**Assist failed:** ' + ((e && e.message) || e); a.ok = false; }
       render();
+    },
+    'assist-apply': (el) => {
+      const k = el.dataset.k, a = ui.assist[k] || {}, fld = APPLYABLE[k];
+      if (!a.ok || !a.out || !fld) return;
+      const s = curStory(); if (!s) return;
+      const path = 's|' + s.id + '|' + fld;
+      setRT(path, applyText(a.out));
+      ui.write[path] = true; // keep the Write tab open so the applied text is visible
+      touch(); render(); toast('Applied AI suggestion — review it, then Save all');
     },
     'case-add': () => { S.draft.cases.push({ id: 'TC-' + String(S.draft.cases.length + 1).padStart(3, '0'), requirement_ref: '', title: '', steps: [], expected: '', priority: 'P1' }); ui.focus = '[data-i="case"][data-f="title"][data-k="' + (S.draft.cases.length - 1) + '"]'; render(); },
     'case-rm': (el) => { S.draft.cases.splice(+el.dataset.k, 1); clearCaseTabs(); render(); },
