@@ -3,6 +3,9 @@
    Read-only text goes through Markdown (marked -> DOMPurify, mermaid fences painted as diagrams); editing stays raw text in Write tabs. */
 (function () {
   'use strict';
+  // Feature flag: file uploads (Browse buttons + drag-and-drop + "Add another document").
+  // false = uploads disabled; testers use "Load NPPES sample". Set true to re-enable.
+  const UPLOADS_ENABLED = false;
   const AI = window.OpenAI, ST = window.State, CSV = window.CSV, MD = window.Markdown, RL = window.Rules;
   let S = ST.load();
   const $ = (id) => document.getElementById(id);
@@ -270,8 +273,8 @@
   const docId = (key, extraIdx) => (extraIdx == null ? key : 'x' + extraIdx);
   function docRow(key, label, d, extraIdx) {
     const id = docId(key, extraIdx), has = !!d.text.trim();
-    const browse = '<label class="link browse">' + (has ? 'Replace' : 'Browse') + '<input type="file" class="vh" accept=".md,.txt,text/*" data-c="file" data-k="' + id + '"></label>';
-    return '<li class="doc' + (has ? '' : ' empty') + (ui.paste[id] ? ' has-paste' : '') + (ui.sheet === 'doc' && ui.docId === id ? ' on' : '') + '" data-doc="' + id + '" data-drop="' + id + '"' + (has ? ' data-a="open-doc" data-k="' + id + '" data-label="' + esc(label) + '"' : '') + '>' +
+    const browse = UPLOADS_ENABLED ? '<label class="link browse">' + (has ? 'Replace' : 'Browse') + '<input type="file" class="vh" accept=".md,.txt,text/*" data-c="file" data-k="' + id + '"></label>' : '';
+    return '<li class="doc' + (has ? '' : ' empty') + (ui.paste[id] ? ' has-paste' : '') + (ui.sheet === 'doc' && ui.docId === id ? ' on' : '') + '" data-doc="' + id + '"' + (UPLOADS_ENABLED ? ' data-drop="' + id + '"' : '') + (has ? ' data-a="open-doc" data-k="' + id + '" data-label="' + esc(label) + '"' : '') + '>' +
       '<span class="doc-label">' + esc(label) + '</span>' +
       (has ? '<span class="doc-file" title="' + esc(d.name || label) + '">' + esc(d.name || label) + '</span>' : '<span class="doc-file doc-empty">No document</span>') +
       '<span class="doc-act">' +
@@ -289,9 +292,9 @@
       '<p class="ext-note"><b>External service:</b> Being Agile runs outside your organization\u2019s infrastructure \u2014 unlike OneDrive or SharePoint, files you load here are not inside your company systems. When you generate or use AI assist, document text may be sent to <b>' + esc(apiHost()) + '</b>. Don\u2019t upload sensitive information or anything you are not authorized to share.</p>' +
       '<ul class="docs">' + docRow('prd', 'PRD', d.prd) + docRow('design', 'Design doc', d.design) + docRow('api', 'API spec', d.api) + '</ul>' +
       (d.extras.length ? '<h2 class="group">Supporting documents</h2><ul class="docs">' + d.extras.map((x, i) => docRow('x', 'Supporting doc ' + (i + 1), x, i)).join('') + '</ul>' : '') +
-      '<div class="bar" style="margin-top:14px"><button class="add-doc" data-a="add-extra" style="margin-top:0">' + ic('plus') + 'Add another document</button><span class="sp"></span><button class="btn btn-q btn-s" data-a="load-sample">Load NPPES sample</button></div>' +
+      '<div class="bar" style="margin-top:14px">' + (UPLOADS_ENABLED ? '<button class="add-doc" data-a="add-extra" style="margin-top:0">' + ic('plus') + 'Add another document</button><span class="sp"></span>' : '') + '<button class="btn btn-q btn-s" data-a="load-sample">Load NPPES sample</button></div>' +
       errBox() + nextRow() +
-      '<p class="how"><b>How this works.</b> AI drafts → you edit → you save. Drop a file on any row, browse for one, or paste text.</p>';
+      '<p class="how"><b>How this works.</b> AI drafts → you edit → you save. ' + (UPLOADS_ENABLED ? 'Drop a file on any row, browse for one, or paste text.' : 'Load the NPPES sample below, or paste text into any row.') + '</p>';
   }
 
   // ---------- 2. Stories ----------
@@ -731,6 +734,7 @@
     } else if ((e.key === 's' || e.key === 'S') && (e.ctrlKey || e.metaKey) && S.step >= 1 && S.step <= 3 && $('lock').hidden) { e.preventDefault(); if (anyDirty()) saveAll(); }
   });
   ['dragover', 'dragleave', 'drop'].forEach((ev) => view.addEventListener(ev, (e) => {
+    if (!UPLOADS_ENABLED) return;
     const z = e.target.closest('[data-drop]'); if (!z) return;
     e.preventDefault(); z.classList.toggle('over', ev === 'dragover');
     if (ev === 'drop') readFile(e.dataTransfer.files[0], z.dataset.drop);
