@@ -56,12 +56,22 @@
   // ---- mermaid: one init, serialized renders, code -> svg cache (null = failed) ----
   const cache = new Map();
   let inited = false, seq = 0, queue = Promise.resolve();
+  // The mermaid <script> is deferred so it never blocks app boot; wait for it (up to ~10s) before giving up.
+  function whenMermaid(timeoutMs) {
+    const t0 = Date.now();
+    const tick = (res) => {
+      if (mermaidOK()) return res(true);
+      if (Date.now() - t0 > timeoutMs) return res(false);
+      setTimeout(() => tick(res), 100);
+    };
+    return new Promise(tick);
+  }
   function svgFor(code) {
     if (cache.has(code)) return Promise.resolve(cache.get(code));
     const job = queue.then(async () => {
       const id = 'mm' + (++seq);
       try {
-        if (!mermaidOK()) throw new Error('mermaid unavailable');
+        if (!(await whenMermaid(10000))) throw new Error('mermaid unavailable');
         if (!inited) {
           root.mermaid.initialize({ startOnLoad: false, theme: 'base', themeVariables: { primaryColor: '#f1f3f1', primaryBorderColor: '#454f4b', primaryTextColor: '#111816', lineColor: '#69736e', textColor: '#454f4b', fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif' } });
           inited = true;

@@ -74,8 +74,8 @@
 <script src="js/pin.js"></script>
 <script src="js/vendor/marked.js"></script>
 <script src="js/vendor/dompurify.js"></script>
-<!-- mermaid via CDN (the 3.4MB vendored copy lives at js/vendor/mermaid.js locally; GitHub's file API can't push files that large, so Pages loads it from CDN and degrades gracefully offline) -->
-<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<!-- mermaid via CDN, deferred so a slow CDN never blocks app boot (markdown.js waits for it at diagram-paint time) -->
+<script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <script src="js/markdown.js"></script>
 <script src="js/screens.js"></script>
 </body>
