@@ -358,7 +358,7 @@
     const lede = 'A strategy-level plan derived from the saved stories: scope, approach, criteria and risks. List sections take one item per line.';
     if (!p) return head('Test plan', lede) + '<div class="empty-card"><p>No plan yet — generate one from the saved stories.</p>' + genBtn(false, 'gen-plan', 'Generate test plan') + '</div>' + errBox();
     const sec = (title, body) => '<section class="plan-sec"><h2>' + title + '</h2><div>' + body + '</div></section>';
-    return head('Test plan', lede, csvBtn('csv-plan') + genBtn(true, 'gen-plan')) + errBox() +
+    return head('Test plan', lede, aiLink('test plan') + csvBtn('csv-plan') + genBtn(true, 'gen-plan')) + assistBox('test plan') + errBox() +
       '<div class="plan">' + sec('Objectives', planBlock(p, 'objectives')) +
       sec('Scope', '<div class="plan-two"><div><h3>In scope</h3>' + planBlock(p, 'scope_in') + '</div><div><h3>Out of scope</h3>' + planBlock(p, 'scope_out') + '</div></div>') +
       sec('Approach', planBlock(p, 'approach')) + sec('Entry criteria', planBlock(p, 'entry_criteria')) + sec('Exit criteria', planBlock(p, 'exit_criteria')) + sec('Risks', planBlock(p, 'risks')) + '</div>' + nextRow();
@@ -399,9 +399,9 @@
       '<div class="cov-map">' + (M.length ? MD.render(covMermaid(M)) : '<span class="hint">Link cases to requirements (e.g. REQ-001) to see the traceability map.</span>') + '</div></section>';
   }
   function testCard(c, i) {
-    const refs = String(c.requirement_ref).split(/[,\s]+/).filter(Boolean).map((r) => r.toUpperCase()), cp = 'case|' + i + '|';
-    return '<div class="cblock" data-card="' + i + '"><div class="cblock-h"><span class="cid">' + esc(c.id) + '</span>' + reqChips(refs) + '<span class="sp"></span>' + prio(c.priority) +
-      '<button class="row-x" data-a="case-rm" data-k="' + i + '" aria-label="Remove case ' + esc(c.id) + '" title="Remove">' + ic('x') + '</button></div>' +
+    const refs = String(c.requirement_ref).split(/[,\s]+/).filter(Boolean).map((r) => r.toUpperCase()), cp = 'case|' + i + '|', akey = 'case ' + i;
+    return '<div class="cblock" data-card="' + i + '"><div class="cblock-h"><span class="cid">' + esc(c.id) + '</span>' + reqChips(refs) + '<span class="sp"></span>' + aiLink(akey) + prio(c.priority) +
+      '<button class="row-x" data-a="case-rm" data-k="' + i + '" aria-label="Remove case ' + esc(c.id) + '" title="Remove">' + ic('x') + '</button></div>' + assistBox(akey) +
       '<div class="cfields"><div><label class="lbl">ID</label><input type="text" class="in" data-i="case" data-f="id" data-k="' + i + '" value="' + esc(c.id) + '" aria-label="ID"></div>' +
       '<div><label class="lbl">Requirement</label><input type="text" class="in" data-i="case" data-f="requirement_ref" data-k="' + i + '" value="' + esc(c.requirement_ref) + '" aria-label="Requirement ref"></div>' +
       '<div><label class="lbl">Priority</label><select class="in" data-c="case-prio" data-k="' + i + '" aria-label="Priority">' + PRIOS.map((x) => '<option' + (x === c.priority ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></div></div>' +
