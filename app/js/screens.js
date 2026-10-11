@@ -679,7 +679,8 @@
         if (tl.status === 'confirmed' && tl.value && ST.timelineFill(tl.value).sprints) {
           const t = ST.timelineFill(tl.value), pts = S.stories.reduce((n, s) => n + (s.points || 0), 0), dev = Math.max(1, t.sprints - (t.pis || 0));
           Object.assign(S.delivery, { sprints: t.sprints, pis: t.pis, quarters: t.quarters, points_per_sprint: Math.ceil(pts / dev), basis: 'Timeline as you confirmed it in Clarify; ' + pts + ' points over ' + dev + ' delivery sprints needs about ' + Math.ceil(pts / dev) + ' points per sprint.' });
-          S.delivery.assumptions = S.delivery.assumptions.filter((a) => !/fit one PI of 6 sprints/.test(a));
+          S.delivery.assumptions = S.delivery.assumptions.filter((a) => !/fit one PI of 6 sprints|team capacity of about/.test(a));
+          S.delivery.assumptions.unshift('Assumes: team capacity of about ' + Math.ceil(pts / dev) + ' points per sprint (derived from your timeline; not stated in the documents)');
         }
       }
       S.clarify.assumptions = carried; S.clarify.status = 'done';

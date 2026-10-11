@@ -122,7 +122,8 @@
       if (l.status === 'assumed') out.push('Assumes ' + LENS_LABEL[k].toLowerCase() + ': ' + (lensText(k, l.value) || 'not stated'));
       else if (l.status === 'open') out.push(LENS_LABEL[k] + ' not stated in the documents; stories do not assume one.');
     });
-    (c.questions || []).forEach((q) => { if (q.status !== 'answered') out.push('Open question (' + q.id + '): ' + q.text); });
+    // a skipped question whose lens you later confirmed by hand is moot; the rest are carried as open
+    (c.questions || []).forEach((q) => { if (q.status !== 'answered' && !(c.ledger[q.lens] && c.ledger[q.lens].status === 'confirmed')) out.push('Open question (' + q.id + '): ' + q.text); });
     return out;
   }
   // djb2 over the document texts: cheap, deterministic, good enough to notice an edit.
