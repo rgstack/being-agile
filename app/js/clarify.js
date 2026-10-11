@@ -5,15 +5,19 @@
    Design: an editorial dossier — a numbered interview in the display face, bound to a ruled ledger in the margin.
    Marks: empty circle = open (or assumed), half circle = found in a document, full green circle = you confirmed it.
    Shape: an IIFE like the other modules; screens.js hands it a slice of its closure via init() and merges
-   actions/inputs/changes (all prefixed cl-) into its own delegation maps. Persisted state lives in S.clarify. */
+   actions/inputs/changes (all prefixed cl-) into its own delegation maps. Persisted state lives in S.clarify.
+   Voice (voice.js, optional): the mic drops transcribed text into the composer as if typed, so it is edited and
+   sent through the same turn(); replies get a speaker button. Turns that began as speech are marked voice:true. */
 (function () {
   'use strict';
   const ST = window.State, AI = window.OpenAI;
+  const VO = () => window.Voice || null; // absent in tests that load clarify.js alone
   const LENSES = ST.LENSES, LABEL = ST.LENS_LABEL;
   let X = null; // from screens.js: getS, ui, render, touch, toast, confirmBox, guarded, go, genStories, esc, mi, ic, fmtUsd, plural, errBox, apiHost, openDoc, openRules
   // View-only state, never persisted. anim: id of the one element that gets an entry animation on this render;
   // animAll: the brief + ledger rows rise together (review just arrived); bump: lens whose mark just changed.
-  const U = { busy: false, err: '', lastText: '', lastSilent: false, anim: null, animAll: false, bump: null, edit: null, editVal: '', staleOk: false, reviewing: false, readT0: 0, capTimer: null, x: {} };
+  // fromVoice: the composer text began as speech (cleared when the box empties); vnote: a one-line voice notice under the composer.
+  const U = { busy: false, err: '', lastText: '', lastSilent: false, lastVoice: false, anim: null, animAll: false, bump: null, edit: null, editVal: '', staleOk: false, reviewing: false, readT0: 0, capTimer: null, x: {}, fromVoice: false, vnote: '' };
   const S = () => X.getS();
   const C = () => S().clarify;
   const esc = (v) => X.esc(v);
@@ -46,10 +50,11 @@
       if (q) parts.push('Q' + qNum(c, q) + ' of ~' + total);
       else if (total) parts.push(open ? X.plural(open, 'question') + ' open' : 'nothing more to ask');
     }
-    return '<p class="cl-head">' + parts.map(esc).join(' <span aria-hidden="true">·</span> ') + '</p>';
+    return '<p class="cl-head">' + parts.map(esc).join(' <span aria-hidden="true">·</span> ') + (VO() ? ' <span aria-hidden="true">·</span> ' + VO().dot() : '') + '</p>';
   }
   const staleNote = (c) => (stale(c) && !U.staleOk ? '<p class="cl-stale" role="status">Documents changed since this review. <button class="link" data-a="cl-rereview">Re-review</button> <span aria-hidden="true">·</span> <button class="link" data-a="cl-keep">Keep going</button></p>' : '');
-  const costLine = (cost) => (cost ? '<span class="cl-cost">' + (cost.dry ? 'dry-run' : '~' + X.fmtUsd(cost.usd || 0) + ' · ' + ((cost.pt || 0) + (cost.ct || 0)).toLocaleString() + ' tokens') + '</span>' : '');
+  // A turn that began as speech shows the local voice price (nothing) in place of the API estimate; the usage meter still records the call.
+  const costLine = (cost) => (cost ? '<span class="cl-cost">' + (cost.voice ? 'local voice · $0.00' : cost.dry ? 'dry-run' : '~' + X.fmtUsd(cost.usd || 0) + ' · ' + ((cost.pt || 0) + (cost.ct || 0)).toLocaleString() + ' tokens') + '</span>' : '');
 
   function renderTop(c) {
     if (reading(c)) {
@@ -82,14 +87,17 @@
       return '<li class="turn ask settled' + anim + '" id="' + t.id + '"><span class="cl-n" aria-hidden="true">' + n + '</span><div class="cl-q"><p class="cl-qt"><span class="vh">Question ' + n + ': </span>' + esc(q.text) + '</p>' + st + '</div></li>';
     }
     if (t.kind === 'you') return '<li class="turn you' + anim + '" id="' + t.id + '"><span class="cl-n" aria-hidden="true"></span><div class="cl-you"><span class="cl-who">You</span><p>' + esc(t.text) + '</p></div></li>';
-    return '<li class="turn say' + anim + '" id="' + t.id + '"><span class="cl-n" aria-hidden="true"></span><div class="cl-say"><p><span class="vh">Analyst: </span>' + X.mi(t.text) + '</p>' + costLine(t.cost) + '</div></li>';
+    const spk = VO() && t.text ? ' ' + VO().speaker(t.id, { dry: AI.getConfig().dryRun }) : '';
+    return '<li class="turn say' + anim + '" id="' + t.id + '"><span class="cl-n" aria-hidden="true"></span><div class="cl-say"><p><span class="vh">Analyst: </span>' + X.mi(t.text) + '</p>' + spk + costLine(t.cost) + '</div></li>';
   }
   function composer(c) {
     const q = cur(c), dry = AI.getConfig().dryRun, live = !dry;
     return '<div class="cl-composer"><div class="cl-box">' +
       (q ? '<button type="button" class="cl-lens" data-a="cl-lens" data-k="' + esc(q.lens) + '" title="Show this row in the ledger">' + esc(LABEL[q.lens]) + ' <span aria-hidden="true">▸</span></button>' : '') +
       '<textarea class="cl-input" data-i="cl-composer" rows="1" aria-label="Your reply" placeholder="' + (q ? 'Answer, or tell me something I missed…' : 'Tell me anything else the stories should know…') + '"' + (U.busy ? ' disabled' : '') + '>' + esc(c.composer) + '</textarea>' +
+      (VO() ? VO().mic({ disabled: U.busy, dry }) : '') +
       '<button type="button" class="cl-send" data-a="cl-send"' + (U.busy ? ' disabled' : '') + '><span class="kbd" aria-hidden="true">⏎</span>Send</button></div>' +
+      (VO() ? VO().micState() : '') + (U.vnote ? '<p class="cl-vnote" role="status">' + esc(U.vnote) + '</p>' : '') +
       (live ? '<p class="ai-hint">Don’t include sensitive information — this goes to ' + esc(X.apiHost()) + '. Each reply is one metered call.</p>' : '<p class="hint cl-dry">Dry-run: scripted replies, nothing is sent.</p>') + '</div>';
   }
   function renderBody(c) {
@@ -224,14 +232,14 @@
     if (prev.status !== next.status || JSON.stringify(prev.value) !== JSON.stringify(next.value)) U.bump = k;
     c.ledger[k] = ST.normLens(k, next);
   }
-  function applyTurn(c, d, usage, cursor, text) {
+  function applyTurn(c, d, usage, cursor, text, voice) {
     Object.keys(d.ledger_updates || {}).forEach((k) => settleLens(c, k, d.ledger_updates[k]));
     (d.question_updates || []).forEach((u) => { const q = c.questions.find((x) => x.id === u.id); if (q) { q.status = u.status; if (u.answer) q.answer = u.answer; } });
     // The analyst moved on without marking the posed question: the user's words were its answer.
     const cq = c.questions.find((q) => q.id === cursor);
     if (cq && cq.status === 'open' && (!d.ask || d.ask.id !== cursor) && text !== '(skipped)') { cq.status = 'answered'; cq.answer = text; }
     let last = null;
-    if (d.reply) { last = { id: tid(), kind: 'say', text: d.reply, at: Date.now(), cost: usage ? { pt: usage.prompt_tokens, ct: usage.completion_tokens, usd: usage.usd, dry: AI.getConfig().dryRun } : null }; c.turns.push(last); }
+    if (d.reply) { last = { id: tid(), kind: 'say', text: d.reply, at: Date.now(), cost: usage ? { pt: usage.prompt_tokens, ct: usage.completion_tokens, usd: usage.usd, dry: AI.getConfig().dryRun, voice: !!voice } : null }; c.turns.push(last); }
     if (d.ask) {
       let q = c.questions.find((x) => x.id === d.ask.id);
       if (q && q.status !== 'open' && q.text !== d.ask.text) q = null; // the model reused an id for a new follow-up
@@ -245,17 +253,18 @@
     opts = opts || {};
     const s = S(), c = s.clarify;
     if (U.busy || X.ui.busy || (c.status !== 'open' && c.status !== 'done')) return;
-    U.busy = true; U.err = ''; U.lastText = text; U.lastSilent = !!opts.silent; U.edit = null;
+    const voice = !!opts.voice;
+    U.busy = true; U.err = ''; U.lastText = text; U.lastSilent = !!opts.silent; U.lastVoice = voice; U.edit = null; U.vnote = '';
     const cursor = c.cursor;
     let you = null;
-    if (!opts.silent) { you = { id: tid(), kind: 'you', text, qid: cursor, at: Date.now() }; c.turns.push(you); c.composer = ''; U.anim = you.id; }
+    if (!opts.silent) { you = { id: tid(), kind: 'you', text, qid: cursor, at: Date.now(), voice }; c.turns.push(you); c.composer = ''; U.fromVoice = false; U.anim = you.id; }
     save(); X.render();
     try {
       const r = await AI.clarifyTurn(ctxFor(c, text));
-      applyTurn(c, r.data, r.usage, cursor, text);
+      applyTurn(c, r.data, r.usage, cursor, text, voice);
       s.usage = AI.getUsage().calls;
     } catch (e) {
-      if (you) { const i = c.turns.indexOf(you); if (i !== -1) c.turns.splice(i, 1); c.composer = text; } // keep what was typed
+      if (you) { const i = c.turns.indexOf(you); if (i !== -1) c.turns.splice(i, 1); c.composer = text; U.fromVoice = voice; } // keep what was typed (or said)
       U.err = (e && e.message) || String(e);
     }
     U.busy = false; save(); X.render();
@@ -307,14 +316,63 @@
     return out;
   }
 
+  // ---------- voice: speech lands in the composer, never straight into the transcript (ask, don't block) ----------
+  const dryRun = () => AI.getConfig().dryRun;
+  // Dry-run has no sidecar: the "transcript" is the analyst's own suggested answer, so the demo stays zero-network.
+  function scriptedSpeech(c) {
+    const q = cur(c);
+    if (!q) return 'Nothing else from me; the stories can go ahead.';
+    return q.default || (q.options || [])[0] || 'Carry that as an assumption for now.';
+  }
+  function dropText(c, text) {
+    const prev = c.composer || '';
+    c.composer = (prev.trim() ? prev.replace(/\s*$/, ' ') : '') + text;
+    U.fromVoice = true;
+  }
+  function micPressed() {
+    const c = C(), V = VO();
+    if (!V || U.busy || X.ui.busy || (c.status !== 'open' && c.status !== 'done')) return;
+    if (dryRun()) {
+      dropText(c, scriptedSpeech(c)); U.vnote = 'Voice unavailable in dry-run: scripted text inserted. Edit it, then send.';
+      save(); X.render(); focusComposer(); return;
+    }
+    if (!V.ready()) { X.toast(V.HINT); V.health(); return; }
+    V.toggle((text, err) => {
+      if (err) X.toast(err);
+      else if (text) { dropText(c, text); U.vnote = ''; save(); }
+      X.render(); if (!err) focusComposer();
+    });
+  }
+  function speakPressed(id) {
+    const c = C(), V = VO(), t = c.turns.find((x) => x.id === id);
+    if (!V || !t) return;
+    if (dryRun()) { X.toast('Voice unavailable in dry-run: the reply would be read aloud here.'); return; }
+    if (!V.ready()) { X.toast(V.HINT); V.health(); return; }
+    V.speak(t.text, id, (err) => { if (err) X.toast(err); });
+  }
+  // Health flips patch the dot and buttons in place (no re-render, so typing is never disturbed); capture/playback states re-render.
+  function syncVoiceDom() {
+    const V = VO(); if (!V || !document.querySelector('.clarify')) return;
+    const dry = dryRun();
+    const d = document.querySelector('.cl-vdot'); if (d) d.outerHTML = V.dot();
+    const m = document.querySelector('.cl-mic'); if (m) m.outerHTML = V.mic({ disabled: U.busy, dry });
+    document.querySelectorAll('.cl-speak').forEach((b) => { b.outerHTML = V.speaker(b.dataset.k, { dry }); });
+  }
+  function voiceChanged(what) {
+    if (!document.querySelector('.clarify')) return;
+    if (what === 'health') syncVoiceDom(); else X.render();
+  }
+
   // ---------- handlers (merged into screens.js maps; names prefixed cl-) ----------
   const actions = {
     'cl-begin': begin,
-    'cl-send': () => { const c = C(), t = c.composer.trim(); if (!t) { focusComposer(); return; } turn(t); },
+    'cl-send': () => { const c = C(), t = c.composer.trim(); if (!t) { focusComposer(); return; } turn(t, { voice: U.fromVoice }); },
+    'cl-mic': micPressed,
+    'cl-speak': (el) => speakPressed(el.dataset.k),
     'cl-chip': (el) => turn(el.dataset.k),
     'cl-other': () => focusComposer(),
     'cl-skip': skip,
-    'cl-retry': () => { U.err = ''; turn(U.lastText, { silent: U.lastSilent }); },
+    'cl-retry': () => { U.err = ''; turn(U.lastText, { silent: U.lastSilent, voice: U.lastVoice }); },
     'cl-confirm': (el) => {
       const c = C(), k = el.dataset.k, l = c.ledger[k];
       settleLens(c, k, { status: 'confirmed' });
@@ -343,12 +401,16 @@
   };
   let saveT;
   const inputs = {
-    'cl-composer': (el) => { C().composer = el.value; grow(el); clearTimeout(saveT); saveT = setTimeout(save, 300); },
+    'cl-composer': (el) => { C().composer = el.value; if (!el.value.trim()) U.fromVoice = false; grow(el); clearTimeout(saveT); saveT = setTimeout(save, 300); },
     'cl-edit': (el) => { U.editVal = el.value; },
   };
   const changes = {};
-  const onEnter = () => { if (C().status === 'open' || C().status === 'done') setTimeout(focusComposer, 0); };
-  const reset = () => { Object.assign(U, { busy: false, err: '', lastText: '', lastSilent: false, anim: null, animAll: false, bump: null, edit: null, editVal: '', staleOk: false, reviewing: false, readT0: 0, x: {} }); clearInterval(U.capTimer); U.capTimer = null; };
+  const onEnter = () => {
+    if (C().status === 'open' || C().status === 'done') setTimeout(focusComposer, 0);
+    if (VO()) VO().watch(true, () => !!document.querySelector('.clarify')); // poll /health while Clarify is on screen
+  };
+  const reset = () => { Object.assign(U, { busy: false, err: '', lastText: '', lastSilent: false, lastVoice: false, anim: null, animAll: false, bump: null, edit: null, editVal: '', staleOk: false, reviewing: false, readT0: 0, x: {}, fromVoice: false, vnote: '' }); clearInterval(U.capTimer); U.capTimer = null; if (VO()) VO().reset(); };
+  const init = (ctx) => { X = ctx; if (VO()) VO().onChange(voiceChanged); };
 
-  window.Clarify = { init: (ctx) => { X = ctx; }, render, meta, onEnter, reset, actions, inputs, changes, dryTurn };
+  window.Clarify = { init, render, meta, onEnter, reset, actions, inputs, changes, dryTurn, scriptedSpeech };
 })();
