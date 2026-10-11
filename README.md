@@ -8,10 +8,15 @@ assets, execution results, and requirement-level proof.
 
 ## The flow
 
-`Start → Stories → Test Plan → Test Cases → Run → Report`
+`Start → Clarify → Stories → Test Plan → Test Cases → Run → Report`
 
 - **Start** — attach the PRD, design doc, API spec, and any supporting documents
-- **Stories** — AI-drafted stories with inline editing, per-story AI revision,
+- **Clarify** — the AI reads every document through a delivery lens (timeline,
+  stakeholders, value stream, business area), fills a ledger with what it could
+  place, and asks about the rest one question at a time. Nothing it asks blocks
+  you: **Generate stories** is always available, and open questions become stated
+  assumptions inside the stories
+- **Stories** — AI-drafted stories, each sized in story points to fit one 2-week sprint, with inline editing, per-story AI revision,
   Jira-style detail panel, subtasks, CSV export for Jira import
 - **Test Plan / Test Cases** — human-revised, traceable to requirements
 - **Run / Report** — simulated execution with requirement-level proof

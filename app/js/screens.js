@@ -1,4 +1,4 @@
-/* Six screens: rendering + interactions. Event delegation on .app / #stage via data-a (click), data-i (input), data-c (change).
+/* Seven screens: rendering + interactions (Clarify renders from clarify.js and registers its handlers here). Event delegation on .app / #stage via data-a (click), data-i (input), data-c (change).
    Shell: sidebar (stages + proof tracker) + top bar + #view + right-hand #sheet (document viewer, story detail).
    Read-only text goes through Markdown (marked -> DOMPurify, mermaid fences painted as diagrams); editing stays raw text in Write tabs. */
 (function () {
@@ -6,7 +6,8 @@
   // Feature flag: file uploads (Browse buttons + drag-and-drop + "Add another document").
   // false = uploads disabled; testers use "Load NPPES sample". Set true to re-enable.
   const UPLOADS_ENABLED = false;
-  const AI = window.OpenAI, ST = window.State, CSV = window.CSV, MD = window.Markdown, RL = window.Rules;
+  const AI = window.OpenAI, ST = window.State, CSV = window.CSV, MD = window.Markdown, RL = window.Rules, CL = window.Clarify;
+  const STEP = ST.STEP; // named stage indices; never compare S.step against a literal
   let S = ST.load();
   const $ = (id) => document.getElementById(id);
   const shell = document.querySelector('.app'), stage = $('stage'), view = $('view'), sheetEl = $('sheet');
@@ -68,22 +69,31 @@
   const dirtyKinds = () => KINDS.filter(([k]) => dirty(k));
   const anyDirty = () => dirtyKinds().length > 0;
 
-  async function guarded(op, input, title, apply) {
+  // One guarded AI call: cost-estimate confirm, busy state, apply, metering. Returns true when the result was applied.
+  const RUNNERS = {
+    stories: (i) => AI.generateStories(i.docs, i.clarify), plan: (i) => AI.generateTestPlan(i), cases: (i) => AI.generateTestCases(i.plan, i.stories),
+    'clarify-review': (i) => AI.clarifyReview(i),
+  };
+  async function guarded(op, input, title, apply, extra) {
     const est = AI.estimateCall(op, input), cfg = AI.getConfig();
     const ok = await confirmBox(title,
       '<p>This will use <b>~' + est.tokens.toLocaleString() + ' tokens</b>, est. <b>' + fmtUsd(est.usd) + '</b> (' + esc(est.model) + ').</p>' +
       '<p class="hint">Input ~' + est.inputTokens.toLocaleString() + ' (cap ' + est.capIn.toLocaleString() + ') · output ~' + est.outputTokens.toLocaleString() + ' (cap ' + est.capOut.toLocaleString() + ')</p>' +
       (cfg.dryRun ? '<p class="hint">Dry-run: simulated response, nothing is sent and nothing is spent.</p>' : '<p>Live call target: <b>' + esc(est.endpointHost) + '</b></p>') +
+      (extra || '') +
       (est.overCap ? '<p class="note">Input is over the budget cap. ' + (cfg.dryRun ? 'A live call would abort; dry-run continues.' : 'This call will be aborted.') + '</p>' : ''), 'Confirm');
-    if (!ok) return;
+    if (!ok) return false;
     ui.busy = true; ui.error = ''; render();
+    let applied = false;
     try {
-      const r = await (op === 'stories' ? AI.generateStories(input) : op === 'plan' ? AI.generateTestPlan(input) : AI.generateTestCases(input.plan, input.stories));
-      apply(r.data);
+      const r = await RUNNERS[op](input);
+      apply(r.data, r.usage);
+      applied = true;
       S.usage = AI.getUsage().calls; ST.save();
       toast('Generated (' + (r.usage.prompt_tokens + r.usage.completion_tokens).toLocaleString() + ' tokens' + (cfg.dryRun ? ' est., dry-run' : ' live') + ')');
     } catch (e) { ui.error = e.message || String(e); }
     ui.busy = false; render();
+    return applied;
   }
 
   // ---------- requirement model (shared by coverage strip + report + proof tracker) ----------
@@ -142,7 +152,7 @@
     const c = counts(), nCases = S.cases.length;
     const planN = S.plan ? Object.keys(PLAN_LABELS).filter((k) => (Array.isArray(S.plan[k]) ? S.plan[k].length : String(S.plan[k] || '').trim())).length : 0;
     const d = S.docs, nDocs = [d.prd, d.design, d.api].concat(d.extras).filter((x) => x.text.trim()).length;
-    const meta = [nDocs ? plural(nDocs, 'document') : 'No documents yet', S.stories.length ? plural(S.stories.length, 'story', 'stories') : 'No stories yet', S.plan ? plural(planN, 'section') : 'No plan yet',
+    const meta = [nDocs ? plural(nDocs, 'document') : 'No documents yet', CL.meta(), S.stories.length ? plural(S.stories.length, 'story', 'stories') : 'No stories yet', S.plan ? plural(planN, 'section') : 'No plan yet',
       nCases ? plural(nCases, 'case') : 'No cases yet', nCases ? (nCases - c['NOT RUN']) + ' of ' + nCases + ' run' : 'Nothing to run', tally.proven + ' of ' + model.length + ' proven'];
     nav.style.setProperty('--i', S.step);
     nav.querySelectorAll('.stage-link').forEach((b, i) => {
@@ -173,17 +183,18 @@
   const head = (title, lede, tools) => '<h1 class="title">' + title + '</h1><p class="lede">' + lede + '</p>' + (tools ? '<div class="bar">' + tools + '</div>' : '');
   const apiHost = () => { try { return new URL(AI.getConfig().endpoint).hostname; } catch (e) { return AI.getConfig().endpoint; } };
   const errBox = () => (ui.error ? '<div class="err" role="alert">' + esc(ui.error) + '</div>' : '');
-  const NEXT = { 0: ['stories', 1], 1: ['the test plan', 2], 2: ['test cases', 3], 3: ['the run', 4], 4: ['the report', 5] };
-  const nextBtn = (step) => { const nx = NEXT[step]; return nx ? '<button class="btn' + (step === 0 ? ' btn-q' : '') + '" data-a="go" data-k="' + nx[1] + '"' + (ST.unlocked(nx[1]) ? '' : ' disabled title="Review gate: save the previous stage first"') + '>Continue to ' + nx[0] + '</button>' : ''; };
+  const NEXT = {};
+  NEXT[STEP.start] = ['Clarify', STEP.clarify]; NEXT[STEP.clarify] = ['stories', STEP.stories]; NEXT[STEP.stories] = ['the test plan', STEP.plan];
+  NEXT[STEP.plan] = ['test cases', STEP.cases]; NEXT[STEP.cases] = ['the run', STEP.run]; NEXT[STEP.run] = ['the report', STEP.report];
+  const nextBtn = (step, quiet) => { const nx = NEXT[step]; return nx ? '<button class="btn' + (quiet ? ' btn-q' : '') + '" data-a="go" data-k="' + nx[1] + '"' + (ST.unlocked(nx[1]) ? '' : ' disabled title="' + (step === STEP.start ? 'Add a document first' : 'Review gate: save the previous stage first') + '"') + '>Continue to ' + nx[0] + '</button>' : ''; };
   // next-step row at the foot of every screen; on Stories / Test plan / Test cases it carries the unsaved-changes hint
   function nextInner() {
     const ks = dirtyKinds(), mac = /Mac|iPhone|iPad/.test(navigator.platform || '');
     let h = '';
-    if (S.step === 0) {
-      const d = S.docs, has = [d.prd, d.design, d.api].concat(d.extras).some((x) => x.text.trim());
-      h = '<button class="btn" data-a="gen-stories"' + (has && !ui.busy ? '' : ' disabled') + '>' + (ui.busy ? 'Generating…' : 'Generate stories') + '</button>' + (S.stories.length ? nextBtn(0) : '');
-    } else h = nextBtn(S.step);
-    if (S.step >= 1 && S.step <= 3 && ks.length) h += '<span class="hint">Unsaved changes in ' + ks.map((k) => k[1]).join(', ') + '. Run and Report use the last saved version. <span class="kbd">' + (mac ? '⌘' : 'Ctrl') + '</span><span class="kbd">S</span> saves.</span>';
+    if (S.step === STEP.start) h = nextBtn(STEP.start) + (S.stories.length ? '<button class="btn btn-q" data-a="go" data-k="' + STEP.stories + '">Go to stories</button>' : '');
+    else if (S.step === STEP.clarify) h = ''; // Clarify carries its own always-available Generate stories action
+    else h = nextBtn(S.step);
+    if (S.step >= STEP.stories && S.step <= STEP.cases && ks.length) h += '<span class="hint">Unsaved changes in ' + ks.map((k) => k[1]).join(', ') + '. Run and Report use the last saved version. <span class="kbd">' + (mac ? '⌘' : 'Ctrl') + '</span><span class="kbd">S</span> saves.</span>';
     return h;
   }
   const nextRow = () => '<div class="next" id="next">' + nextInner() + '</div>';
@@ -247,16 +258,20 @@
       '<button class="icon-btn" data-a="sheet-close" aria-label="Close rules">' + ic('x') + '</button><span class="sheet-prog" aria-hidden="true"></span></div>' +
       '<div class="sheet-body"><article class="md doc-md sheet-swap">' + MD.render(RL.markdown) + '</article></div>';
   }
-  function openRulesSheet() {
+  function openRulesSheet(section) {
     ui.sheet = 'rules'; ui.subEdit = null;
     sheetEl.innerHTML = sheetRules(); sheetEl.setAttribute('aria-label', RL.title);
     stage.dataset.sheet = 'rules'; stage.classList.add('open');
     MD.paintMermaid(sheetEl);
+    if (section) { // e.g. '8' scrolls to "## 8. …"
+      const h = Array.from(sheetEl.querySelectorAll('h2')).find((x) => x.textContent.trim().indexOf(section + '.') === 0);
+      if (h) { h.scrollIntoView({ block: 'start' }); h.classList.add('flash'); }
+    }
     sheetEl.querySelector('[data-a="sheet-close"]').focus();
   }
   function paintSheet(keepTop) {
-    if (ui.sheet === 'story' && (S.step !== 1 || !curStory())) ui.sheet = null;
-    if (ui.sheet === 'doc' && S.step !== 0) ui.sheet = null;
+    if (ui.sheet === 'story' && (S.step !== STEP.stories || !curStory())) ui.sheet = null;
+    if (ui.sheet === 'doc' && S.step !== STEP.start && S.step !== STEP.clarify) ui.sheet = null; // Clarify's ledger citations open documents too
     if (ui.sheet === 'story') {
       sheetEl.innerHTML = sheetStory(curStory()); sheetEl.setAttribute('aria-label', 'Story detail');
       stage.dataset.sheet = 'story'; stage.classList.add('open');
@@ -293,7 +308,7 @@
       (d.extras.length ? '<h2 class="group">Supporting documents</h2><ul class="docs">' + d.extras.map((x, i) => docRow('x', 'Supporting doc ' + (i + 1), x, i)).join('') + '</ul>' : '') +
       '<div class="bar" style="margin-top:14px">' + (UPLOADS_ENABLED ? '<button class="add-doc" data-a="add-extra" style="margin-top:0">' + ic('plus') + 'Add another document</button><span class="sp"></span>' : '') + '<button class="btn btn-q btn-s" data-a="load-sample">Load NPPES sample</button></div>' +
       errBox() + nextRow() +
-      '<p class="how"><b>How this works.</b> AI drafts → you edit → you save. ' + (UPLOADS_ENABLED ? 'Drop a file on any row, browse for one, or paste text.' : 'Load the NPPES sample below, or paste text into any row.') + '</p>' +
+      '<p class="how"><b>How this works.</b> AI reads → asks → drafts → you edit → you save. ' + (UPLOADS_ENABLED ? 'Drop a file on any row, browse for one, or paste text.' : 'Load the NPPES sample below, or paste text into any row.') + '</p>' +
       '<p class="ext-note"><b>NOTE:</b> <b>External service:</b> Being Agile runs outside your organization\u2019s infrastructure \u2014 files and content you load here are not inside your company systems. When you generate or use AI assist, document text may be sent to <b>' + esc(apiHost()) + '</b>. Don\u2019t upload sensitive information or anything you are not authorized to share.</p>';
   }
 
@@ -570,13 +585,16 @@
   }
 
   // ---------- render ----------
-  const SCREENS = [renderStart, renderStories, renderPlan, renderCases, renderRun, renderReport];
+  const SCREENS = [];
+  SCREENS[STEP.start] = renderStart; SCREENS[STEP.clarify] = CL.render; SCREENS[STEP.stories] = renderStories; SCREENS[STEP.plan] = renderPlan;
+  SCREENS[STEP.cases] = renderCases; SCREENS[STEP.run] = renderRun; SCREENS[STEP.report] = renderReport;
+  const FULL = [STEP.clarify, STEP.cases, STEP.run]; // screens that use the whole width
   function render() {
-    if (!ST.unlocked(S.step)) S.step = 0;
+    if (!ST.unlocked(S.step)) S.step = STEP.start;
     renderChrome();
     const y = view.scrollTop, ae = document.activeElement, keep = ae && ae.dataset && ae.dataset.i && stage.contains(ae) ? { i: ae.dataset.i, k: ae.dataset.k, f: ae.dataset.f } : null;
     const sb = sheetEl.querySelector('.sheet-body'), sbTop = sb ? sb.scrollTop : 0;
-    view.innerHTML = '<div class="page' + (S.step === 3 || S.step === 4 ? ' full' : '') + (ui.enter ? ' enter' : '') + '">' + SCREENS[S.step]() + '</div>';
+    view.innerHTML = '<div class="page' + (FULL.indexOf(S.step) !== -1 ? ' full' : '') + (ui.enter ? ' enter' : '') + '">' + SCREENS[S.step]() + '</div>';
     ui.enter = false;
     view.scrollTop = y;
     hydrate(view);
@@ -589,7 +607,7 @@
   function touch() {
     chromeSave();
     const nx = $('next'); if (nx) nx.innerHTML = nextInner();
-    const s = S.step === 1 && curStory();
+    const s = S.step === STEP.stories && curStory();
     if (s) {
       const c = view.querySelector('.card[data-k="' + (window.CSS && CSS.escape ? CSS.escape(s.id) : s.id) + '"]'); if (c) c.innerHTML = cardInner(s);
       const f = $('storyfoot'); if (f) f.innerHTML = footStory(s);
@@ -600,6 +618,7 @@
     S.step = i; ST.save(); ui.error = ''; ui.subEdit = null; ui.sheet = null; ui.enter = true;
     stage.classList.remove('open'); delete stage.dataset.sheet;
     render(); if (!ui.scrollTo) view.scrollTop = 0;
+    if (i === STEP.clarify) CL.onEnter();
   }
 
   // ---------- commit ----------
@@ -607,7 +626,7 @@
   function cleanDraft() {
     const D = S.draft;
     if (D.plan) ['scope_in', 'scope_out', 'entry_criteria', 'exit_criteria', 'risks'].forEach((k) => { D.plan[k] = (D.plan[k] || []).filter((x) => safeTrim(x)); });
-    if (D.stories) D.stories.forEach((s) => { s.acceptance_criteria = (s.acceptance_criteria || []).filter((x) => safeTrim(x)); s.subtasks = (s.subtasks || []).filter((t) => safeTrim(t && t.text)); });
+    if (D.stories) D.stories.forEach((s) => { s.acceptance_criteria = (s.acceptance_criteria || []).filter((x) => safeTrim(x)); s.subtasks = (s.subtasks || []).filter((t) => safeTrim(t && t.text)); s.assumptions = (s.assumptions || []).filter((x) => safeTrim(x)); });
     if (D.cases) D.cases.forEach((c) => { c.steps = (c.steps || []).filter((x) => safeTrim(x)); });
   }
   let savedT;
@@ -631,6 +650,19 @@
     const b = $('btn-theme'); b.innerHTML = ic(dark ? 'sun' : 'moon'); b.setAttribute('aria-label', dark ? 'Switch to the light theme' : 'Switch to the dark theme');
   }
 
+  // Generate (or regenerate) stories from the documents plus the delivery ledger. Triggered from Clarify; never gated on open questions.
+  function genStories() {
+    return guarded('stories', { docs: S.docs, clarify: S.clarify }, S.stories.length ? 'Regenerate stories' : 'Generate stories', (data) => {
+      S.stories = data.stories.map(ST.normStory); S.draft.stories = ST.clone(S.stories);
+      const carried = ST.openAssumptions(S.clarify);
+      S.delivery = ST.normDelivery(data.delivery) || { sprints: null, pis: null, quarters: null, points_per_sprint: null, basis: '', assumptions: [] };
+      if (AI.getConfig().dryRun) carried.forEach((a) => { if (S.delivery.assumptions.indexOf(a) === -1) S.delivery.assumptions.push(a); }); // the canned sample cannot know what you left open
+      S.clarify.assumptions = carried; S.clarify.status = 'done';
+      S.plan = null; S.draft.plan = null; S.cases = []; S.draft.cases = null; S.results = {}; S.sampleResults = false; ui.write = {}; ui.subEdit = null; ui.sheet = null;
+      S.sel = S.stories[0] && S.stories[0].id; S.step = STEP.stories; ui.enter = true;
+    }, S.stories.length ? '<p class="note">This replaces the saved stories, test plan, cases and results.</p>' : '');
+  }
+
   // ---------- actions ----------
   // Story-section assist boxes are keyed by section, not by story — clear them on
   // story switch so one story's AI output never lingers on another story.
@@ -638,14 +670,14 @@
   const A = {
     'open-doc': (el) => openDocSheet(docRef(el.dataset.k), el.dataset.label, el.dataset.k),
     'sheet-close': closeSheet,
-    'open-rules': () => { if (ui.sheet === 'rules') closeSheet(); else openRulesSheet(); },
+    'open-rules': (el) => { if (ui.sheet === 'rules' && !(el && el.dataset.k)) closeSheet(); else openRulesSheet(el && el.dataset.k); },
     theme: () => setTheme(document.documentElement.dataset.theme !== 'dark'),
     trace: (el) => {
       const id = el.dataset.k;
-      if (!ST.unlocked(5)) { toast('The report unlocks once test cases exist'); return; }
-      if (ui.trace === id && S.step === 5) { ui.trace = null; render(); return; }
+      if (!ST.unlocked(STEP.report)) { toast('The report unlocks once test cases exist'); return; }
+      if (ui.trace === id && S.step === STEP.report) { ui.trace = null; render(); return; }
       ui.trace = id; ui.open.add(id); ui.scrollTo = '#rr-' + id;
-      if (S.step !== 5) go(5); else render();
+      if (S.step !== STEP.report) go(STEP.report); else render();
     },
     'trace-clear': () => { ui.trace = null; render(); },
     'toggle-paste': (el) => { ui.paste[el.dataset.k] = !ui.paste[el.dataset.k]; ui.focus = '[data-i="doc"][data-k="' + el.dataset.k + '"]'; render(); },
@@ -657,11 +689,7 @@
       S.docs.prd = { name: 'prd' + sfx + '.md (NPPES sample)', text: d.prd }; S.docs.design = { name: 'design' + sfx + '.md (NPPES sample)', text: d['design']  }; S.docs.api = { name: 'api-spec' + sfx + '.md (NPPES sample)', text: d['api-spec'] };
       ST.save(); closeSheet(); render(); toast('NPPES sample loaded');
     },
-    'gen-stories': () => guarded('stories', S.docs, 'Generate stories', (data) => {
-      S.stories = data.map(ST.normStory); S.draft.stories = ST.clone(S.stories);
-      S.plan = null; S.draft.plan = null; S.cases = []; S.draft.cases = null; S.results = {}; S.sampleResults = false; ui.write = {}; ui.subEdit = null; ui.sheet = null;
-      S.sel = S.stories[0] && S.stories[0].id; S.step = 1; ui.enter = true;
-    }),
+    'gen-stories': () => genStories(),
     'gen-plan': () => { if (anyDirty() && !confirm('Unsaved edits will not be used. Continue with last saved stories?')) return; return guarded('plan', S.stories, 'Generate test plan', (data) => { S.plan = ST.normPlan(data); S.draft.plan = ST.clone(S.plan); S.cases = []; S.draft.cases = null; S.results = {}; S.sampleResults = false; Object.keys(ui.write).forEach((k) => { if (k.indexOf('plan|') === 0) delete ui.write[k]; }); clearCaseTabs(); }); },
     'gen-cases': () => guarded('cases', { plan: S.plan, stories: S.stories }, 'Generate test cases', (data) => { S.cases = data.map(ST.normCase); S.draft.cases = ST.clone(S.cases); S.results = {}; S.sampleResults = false; clearCaseTabs(); }),
     'save-all': saveAll,
@@ -772,7 +800,7 @@
       const d = docRef(el.dataset.k), was = !!d.text.trim();
       d.text = el.value;
       if (was !== !!d.text.trim()) { ST.save(); render(); return; } // row flips empty<->loaded: View button appears/disappears
-      clearTimeout(saveT); saveT = setTimeout(() => { ST.save(); const b = app.querySelector('[data-a="gen-stories"]'); if (b) b.disabled = ui.busy || ![S.docs.prd, S.docs.design, S.docs.api].concat(S.docs.extras).some((x) => x.text.trim()); }, 300);
+      clearTimeout(saveT); saveT = setTimeout(ST.save, 300);
     },
     rt: (el) => { setRT(el.dataset.k, el.value); grow(el); },
     's-title': (el) => { curStory().title = el.value.replace(/\n/g, ' '); grow(el); },
@@ -789,6 +817,13 @@
     sample: (el) => { ST.setSampleResults(el.checked); ST.save(); render(); },
     file: (el) => { const f = el.files[0]; el.value = ''; readFile(f, el.dataset.k); },
   };
+  // Clarify's handlers (all prefixed cl-) share the same delegation; it gets what it needs from this closure.
+  CL.init({
+    getS: () => S, ui, render, touch, toast, confirmBox, guarded, go, genStories, esc, mi, ic, fmtUsd, plural, errBox: () => errBox(), apiHost,
+    openDoc: (id) => { const d = docRef(id); if (d) openDocSheet(d, id === 'prd' ? 'PRD' : id === 'design' ? 'Design doc' : id === 'api' ? 'API spec' : 'Supporting doc ' + (+id.slice(1) + 1), id); },
+    openRules: (sec) => openRulesSheet(sec),
+  });
+  Object.assign(A, CL.actions); Object.assign(I_, CL.inputs); Object.assign(C, CL.changes);
   function readFile(f, id) {
     if (!f) return;
     const r = new FileReader();
@@ -822,6 +857,8 @@
     if (t.matches('[data-i="st-edit"]') && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); const b = app.querySelector('[data-a="' + (e.key === 'Enter' ? 'st-save' : 'st-cancel') + '"]'); if (b) b.click(); }
     else if (t.matches('[data-i="s-title"]') && e.key === 'Enter') e.preventDefault();
     else if (t.matches('[data-i="assist-prompt"]') && e.key === 'Enter') { e.preventDefault(); const b = app.querySelector('[data-a="assist"][data-k="' + t.dataset.k + '"]'); if (b) b.click(); }
+    else if (t.matches('[data-i="cl-composer"]') && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const b = app.querySelector('[data-a="cl-send"]'); if (b && !b.disabled) b.click(); } // Shift+Enter inserts a newline
+    else if (t.matches('[data-i="cl-edit"]') && (e.key === 'Enter' || e.key === 'Escape') && !(e.key === 'Enter' && e.shiftKey)) { e.preventDefault(); const b = app.querySelector('[data-a="' + (e.key === 'Enter' ? 'cl-edit-save' : 'cl-edit-cancel') + '"]'); if (b) b.click(); }
   });
   document.addEventListener('keydown', (e) => {
     const modal = $('modal'), dr = $('drawer');
@@ -829,7 +866,7 @@
       if (!modal.hidden) { const c = modal.querySelector('[data-r="0"]'); if (c) c.click(); }
       else if (!dr.hidden) { dr.hidden = true; $('btn-gear').setAttribute('aria-expanded', 'false'); }
       else if (ui.sheet && !e.target.closest('input, textarea, select')) closeSheet();
-    } else if ((e.key === 's' || e.key === 'S') && (e.ctrlKey || e.metaKey) && S.step >= 1 && S.step <= 3 && $('lock').hidden) { e.preventDefault(); if (anyDirty()) saveAll(); }
+    } else if ((e.key === 's' || e.key === 'S') && (e.ctrlKey || e.metaKey) && S.step >= STEP.stories && S.step <= STEP.cases && $('lock').hidden) { e.preventDefault(); if (anyDirty()) saveAll(); }
   });
   ['dragover', 'dragleave', 'drop'].forEach((ev) => view.addEventListener(ev, (e) => {
     if (!UPLOADS_ENABLED) return;
@@ -861,7 +898,7 @@
   keyEl.addEventListener('change', syncKey); // change fires for autofill/password-manager fills that skip input events
   $('btn-reset').onclick = async () => {
     if (!(await confirmBox('Reset demo?', '<p>This clears all saved documents, stories, plan, cases and results from this browser.</p>', 'Reset'))) return;
-    S = ST.reset(); AI.loadUsage([]); ui.assist = {}; ui.paste = {}; ui.write = {}; ui.subEdit = null; ui.error = ''; ui.trace = null; ui.open = new Set(); ui.runOpen = new Set(); closeSheet(); drawer.hidden = true; $('btn-gear').setAttribute('aria-expanded', 'false'); store((s) => s.removeItem(KEYSTORE)); keyEl.value = ''; AI.configure({ apiKey: '' }); render(); toast('Demo reset');
+    S = ST.reset(); AI.loadUsage([]); CL.reset(); ui.assist = {}; ui.paste = {}; ui.write = {}; ui.subEdit = null; ui.error = ''; ui.trace = null; ui.open = new Set(); ui.runOpen = new Set(); closeSheet(); drawer.hidden = true; $('btn-gear').setAttribute('aria-expanded', 'false'); store((s) => s.removeItem(KEYSTORE)); keyEl.value = ''; AI.configure({ apiKey: '' }); render(); toast('Demo reset');
   };
 
   // ---------- build version stamp (bottom-left), auto-read from the ?v= cache-buster ----------

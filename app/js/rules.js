@@ -39,7 +39,7 @@
 | **N** | Negotiable | Is the detail still open to conversation, rather than fixed like a contract? |
 | **V** | Valuable | Does a user or the business notice when it ships? |
 | **E** | Estimable | Can the team size it without guessing? |
-| **S** | Small | Does it fit comfortably inside one iteration? |
+| **S** | Small | Does it fit comfortably inside **one 2-week sprint**? |
 | **T** | Testable | Could someone prove it is done with a clear pass/fail check? |
 
 ## 4. Definition of Ready
@@ -51,7 +51,7 @@ A story is ready to be picked up when:
 - [ ] **Acceptance criteria** are written, one per line, and each one is verifiable.
 - [ ] The requirement(s) it covers are linked (\`REQ-nnn\`).
 - [ ] Dependencies and open questions are named, with an owner for each.
-- [ ] Priority is set and the team has sized it.
+- [ ] Priority is set and **story points** are on it (1, 2, 3, 5, 8; it fits one sprint).
 - [ ] A reviewer has read it and agrees it is understood.
 
 ## 5. Definition of Done
@@ -73,6 +73,47 @@ A story is done when:
 3. **Clear numbered steps.** Each step is a single action someone else could repeat exactly.
 4. **Unambiguous expected result.** Specific values, codes and messages, so any two reviewers reach the same pass or fail.
 5. **Requirement traceability.** Every case carries the \`REQ-nnn\` it proves, so each requirement ends with a verdict.
+
+## 7. Delivery lens: how Clarify reads your documents
+
+Before stories are drafted, every document is read through a delivery and
+implementation lens. The AI places what it can, asks about what it cannot, and
+writes the rest down as assumptions. These are the four things it is looking for.
+
+| Lens | Question it answers | Units and conventions |
+|---|---|---|
+| **Timeline** | How long is this, and in what units? | Sprints are **2 weeks**. A **Program Increment (PI) is about one quarter**: 6 sprints (5 for delivery plus 1 for innovation and planning). State the timeline as *sprints → PIs → quarters*, e.g. "12 sprints ≈ 2 PIs ≈ 2 quarters". |
+| **Stakeholders** | Who are they, and what does each one need from this? | Name the sponsor, the product owner, the user groups, and anyone who signs off. A role without a name is still a stakeholder; a name without a role is a question. |
+| **Value stream** | Which value stream does this work belong to? | The end-to-end flow that creates value for a customer (for example *Provider onboarding* or *Claims adjudication*). One primary value stream per body of work. |
+| **Business area** | Which business area on the delivery side owns it? | The delivery organisation that will build and run it. One primary area; secondary areas are noted, not asked about. |
+
+**Out of scope for now:** the offshore versus onsite team mix. It is a cost lens, not a
+delivery lens, and Clarify does not ask about it.
+
+### 7.1 Questions never block
+
+- Clarify asks only about what the documents do not answer, one question at a time,
+  with the reason it is asking.
+- You can answer, skip, or leave at any point. **Generate stories** is always
+  available.
+- Whatever is still open when stories are generated becomes a **stated assumption**
+  inside the affected stories ("Assumes: Phase 1 is one PI"), never a silent guess.
+- A reading the AI took from a document is shown as *found* (half mark) until you
+  confirm it. Only a fact you confirmed is shown green.
+
+## 8. Story sizing rules
+
+1. **One sprint, no carry-forward.** Every story is completable, tested and done inside
+   a single 2-week sprint by one team. If it cannot be, it is split before it is
+   written, not after.
+2. **Every story gets story points.** Fibonacci scale: 1, 2, 3, 5, 8. **8 is the
+   ceiling**; anything the team would size above 8 does not fit a sprint and must be
+   split. The points carry a one-line sizing rationale.
+3. **Points reflect effort, uncertainty and risk**, not hours. An open assumption adds
+   uncertainty and should show up in the size.
+4. **Timeline is derived, not declared.** Total points over the team's sprint capacity
+   gives sprints; sprints over 6 gives PIs; PIs are quarters. When capacity is unknown,
+   the stories say so and the estimate is marked as an assumption.
 `;
   window.Rules = { title, markdown };
 })();
