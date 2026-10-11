@@ -1,0 +1,7 @@
+{
+  "name": "being-agile-tests",
+  "private": true,
+  "description": "Smoke tests for the browser app (jsdom is a test-only dependency; the app itself has no npm dependencies).",
+  "scripts": { "test": "node --test" },
+  "devDependencies": { "jsdom": "^26.1.0" }
+}
