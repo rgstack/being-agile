@@ -25,6 +25,7 @@ STT_DIR = os.path.join(MODELS, "faster-whisper-base")
 TTS_ONNX = os.path.join(MODELS, "en_US-lessac-medium.onnx")
 LANG = os.environ.get("VOICE_LANG", "en")
 HINT = "run: python3 sidecar/download_models.py"
+INSTALL = "run: python3 -m pip install -r sidecar/requirements.txt"
 
 STT = {"model": None, "err": None}
 TTS = {"voice": None, "err": None}
@@ -32,14 +33,20 @@ TTS = {"voice": None, "err": None}
 
 def load_models():
     try:
-        from faster_whisper import WhisperModel
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError:
+            raise ImportError("faster-whisper is not installed — " + INSTALL)
         if not os.path.isdir(STT_DIR):
             raise FileNotFoundError("STT model not found at " + STT_DIR + " — " + HINT)
         STT["model"] = WhisperModel(STT_DIR, device="cpu", compute_type="int8")
     except Exception as e:  # ImportError or missing files: keep serving, report on use
         STT["err"] = "%s: %s" % (type(e).__name__, e)
     try:
-        from piper import PiperVoice
+        try:
+            from piper import PiperVoice
+        except ImportError:
+            raise ImportError("piper-tts is not installed — " + INSTALL)
         if not os.path.isfile(TTS_ONNX) or not os.path.isfile(TTS_ONNX + ".json"):
             raise FileNotFoundError("TTS voice not found at " + TTS_ONNX + " — " + HINT)
         TTS["voice"] = PiperVoice.load(TTS_ONNX)
@@ -68,6 +75,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")  # file:// pages send Origin: null
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Private-Network", "true")  # Chrome PNA: an https page may call localhost
 
     def _json(self, code, obj):
         body = json.dumps(obj).encode("utf-8")

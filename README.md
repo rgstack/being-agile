@@ -16,6 +16,8 @@ assets, execution results, and requirement-level proof.
   place, and asks about the rest one question at a time. Nothing it asks blocks
   you: **Generate stories** is always available, and open questions become stated
   assumptions inside the stories
+  - *Voice (optional):* speak your answers and hear the analyst's replies through a
+    local sidecar on your own machine (see [`sidecar/`](sidecar/)); nothing leaves it
 - **Stories** — AI-drafted stories, each sized in story points to fit one 2-week sprint, with inline editing, per-story AI revision,
   Jira-style detail panel, subtasks, CSV export for Jira import
 - **Test Plan / Test Cases** — human-revised, traceable to requirements
