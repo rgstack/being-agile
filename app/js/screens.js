@@ -90,7 +90,7 @@
       apply(r.data, r.usage);
       applied = true;
       S.usage = AI.getUsage().calls; ST.save();
-      toast('Generated (' + (r.usage.prompt_tokens + r.usage.completion_tokens).toLocaleString() + ' tokens' + (cfg.dryRun ? ' est., dry-run' : ' live') + ')');
+      toast((op === 'clarify-review' ? 'Reviewed' : 'Generated') + ' (' + (r.usage.prompt_tokens + r.usage.completion_tokens).toLocaleString() + ' tokens' + (cfg.dryRun ? ' est., dry-run' : ' live') + ')');
     } catch (e) { ui.error = e.message || String(e); }
     ui.busy = false; render();
     return applied;
@@ -205,7 +205,8 @@
   // ---------- markdown Write / Preview tabs ----------
   // fmt: 'ac' = one item per line -> checklist; 'steps' = one per line -> numbered list; '' = plain markdown
   const numbered = (t) => t.split('\n').map((l) => l.trim().replace(/^\d+[.)]\s+/, '')).filter(Boolean).map((l, i) => (i + 1) + '. ' + l).join('\n');
-  const previewHtml = (v, fmt) => (fmt === 'ac' ? MD.render(v, { list: true }) : MD.render(fmt === 'steps' ? numbered(v) : v));
+  const bullets = (t) => t.split('\n').map((l) => l.trim().replace(/^[-*+]\s+/, '')).filter(Boolean).map((l) => '- ' + l).join('\n');
+  const previewHtml = (v, fmt) => (fmt === 'ac' ? MD.render(v, { list: true }) : MD.render(fmt === 'steps' ? numbered(v) : fmt === 'asm' ? bullets(v) : v));
   function rt(path, value, fmt, min) {
     const w = !!ui.write[path], p = esc(path), tab = (t, label, on) => '<button type="button" role="tab" data-a="rt-tab" data-k="' + p + '" data-t="' + t + '" aria-selected="' + on + '">' + label + '</button>';
     return '<div class="rt" data-fmt="' + (fmt || '') + '"><div class="rt-tabs" role="tablist">' + tab('preview', 'Preview', !w) + tab('write', 'Write', w) + '</div>' +
@@ -222,7 +223,7 @@
   }
   function setRT(path, v) {
     const p = path.split('|');
-    if (p[0] === 's') { const s = (S.draft.stories || []).find((x) => x.id === p[1]); if (!s) return; if (p[2] === 'desc') s.description = v; else s.acceptance_criteria = v.split('\n'); }
+    if (p[0] === 's') { const s = (S.draft.stories || []).find((x) => x.id === p[1]); if (!s) return; if (p[2] === 'desc') s.description = v; else if (p[2] === 'asm') s.assumptions = v.split('\n'); else s.acceptance_criteria = v.split('\n'); }
     else if (p[0] === 'plan') { const k = p[1]; S.draft.plan[k] = Array.isArray(S.draft.plan[k]) ? v.split('\n') : v; }
     else if (p[0] === 'case') { const c = S.draft.cases[+p[1]]; if (!c) return; if (p[2] === 'steps') c.steps = v.split('\n'); else c.expected = v; }
   }
@@ -317,6 +318,8 @@
   const PRIO_ICON = { P0: 'Highest', P1: 'High', P2: 'Medium', P3: 'Low' };
   const prio = (p) => '<span class="prio">' + (PRIO_ICON[p] ? ic(PRIO_ICON[p]) : '') + esc(p) + '</span>';
   const statusChip = (s) => '<span class="status" data-s="' + esc(s) + '"><i></i>' + esc(s) + '</span>';
+  // Story points (rule 8). A missing size renders muted and visible, never hidden.
+  const ptsChip = (s) => (s.points != null ? '<span class="pts" title="Story points">' + s.points + ' pts</span>' : '<span class="pts none" title="No story points yet">— pts</span>');
   const curStory = () => (S.draft.stories || []).find((s) => s.id === S.sel);
   const reqsOf = (labels) => labels.filter((l) => /^REQ-/i.test(l));
   const storyEdited = (s) => { const v = S.stories.find((x) => x.id === s.id); return !v || JSON.stringify(v) !== JSON.stringify(s); };
@@ -424,10 +427,13 @@
       '<textarea class="story-title ed-in" rows="1" spellcheck="false" data-i="s-title" aria-label="Summary">' + esc(s.title) + '</textarea>' +
       '<dl class="fields"><div><dt>Status</dt><dd><select class="in" data-c="s-status" aria-label="Status">' + STATUSES.map((x) => '<option' + (x === s.status ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></dd></div>' +
       '<div><dt>Priority</dt><dd><select class="in" data-c="s-priority" aria-label="Priority">' + PRIOS.map((x) => '<option' + (x === s.priority ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></dd></div>' +
+      '<div><dt>Points</dt><dd><select class="in" data-c="s-points" aria-label="Story points" title="Fibonacci; 8 is the ceiling (rule 8)">' + [['', '—']].concat(ST.POINTS.map((x) => [x, x + ' pts'])).map(([v, l]) => '<option value="' + v + '"' + (String(s.points == null ? '' : s.points) === String(v) ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></dd></div>' +
+      '<div><dt>Sizing</dt><dd><input type="text" class="in" data-i="s-sizing" value="' + esc(s.size_rationale || '') + '" placeholder="Why this size, in one line" aria-label="Sizing rationale"></dd></div>' +
       '<div class="wide"><dt>Assignee</dt><dd><input type="text" class="in" data-i="s-assignee" value="' + esc(s.assignee) + '" placeholder="Unassigned" aria-label="Assignee"></dd></div>' +
       '<div class="wide"><dt>Labels</dt><dd><input type="text" class="in" data-i="s-labels" value="' + esc(s.labels.join(', ')) + '" placeholder="comma-separated" aria-label="Labels"><div class="cats" id="cats" aria-label="Category">' + catsHtml(s.labels) + '</div></dd></div></dl>' +
       '<section class="sec"><div class="lbl-row"><h3>Description</h3>' + aiLink('description') + '</div>' + assistBox('description') + rt(sp + 'desc', s.description, '', 5) + '</section>' +
       '<section class="sec"><div class="lbl-row"><h3>Acceptance criteria<span class="n">one per line</span></h3>' + aiLink('acceptance criteria') + '</div>' + assistBox('acceptance criteria') + rt(sp + 'ac', s.acceptance_criteria.join('\n'), 'ac', 4) + '</section>' +
+      '<section class="sec"><div class="lbl-row"><h3>Assumptions<span class="n">' + ((s.assumptions || []).filter((x) => x.trim()).length ? 'one per line · stated, not silent' : 'none stated') + '</span></h3></div>' + rt(sp + 'asm', (s.assumptions || []).join('\n'), 'asm', 2) + '</section>' +
       '<section class="sec"><div class="lbl-row"><h3>Subtasks<span class="n">' + nDone + ' of ' + s.subtasks.length + ' done</span></h3>' + aiLink('subtasks') + '</div>' + assistBox('subtasks') +
       '<ul class="subs">' + s.subtasks.map((t, i) => subRow(t, i, s.id)).join('') + '</ul>' +
       '<button class="add-row" data-a="st-add">' + ic('plus') + 'Add a subtask</button></section></div></div>' +
@@ -442,14 +448,25 @@
     return '<span class="card-k"><span class="key">' + ic('story') + esc(s.id) + '</span>' + statusChip(s.status) + '</span>' +
       (ed ? '<span class="card-r"><i class="dot"></i>Edited</span>' : '<span class="card-r ok">' + ic('check') + 'Saved</span>') +
       '<span class="card-t">' + mi(s.title) + '</span><span class="card-x">' + esc(descText(s)) + '</span>' +
-      '<span class="card-m">' + reqChips(reqsOf(s.labels).map((l) => l.toUpperCase())) + '<span class="sp"></span><span class="hint">' + nAc + ' criteri' + (nAc === 1 ? 'on' : 'a') + ' · ' + nDone + '/' + s.subtasks.length + ' subtask' + (s.subtasks.length === 1 ? '' : 's') + '</span>' + prio(s.priority) +
+      '<span class="card-m">' + reqChips(reqsOf(s.labels).map((l) => l.toUpperCase())) + '<span class="sp"></span><span class="hint">' + nAc + ' criteri' + (nAc === 1 ? 'on' : 'a') + ' · ' + nDone + '/' + s.subtasks.length + ' subtask' + (s.subtasks.length === 1 ? '' : 's') + '</span>' + prio(s.priority) + ptsChip(s) +
       (s.assignee ? '<span class="avatar" title="' + esc(s.assignee) + '">' + esc(initials(s.assignee)) + '</span>' : '<span class="avatar none" title="Unassigned"></span>') + '</span>';
   }
   const storyCard = (s) => '<li><button class="card" data-a="sel" data-k="' + esc(s.id) + '" aria-current="' + (ui.sheet === 'story' && s.id === S.sel) + '">' + cardInner(s) + '</button></li>';
+  // Under the lede: the timeline derived from the points (rule 8.4) and the assumptions the stories carry.
+  function deliveryLine(L) {
+    const d = S.delivery; if (!d) return '';
+    const pts = L.reduce((t, s) => t + (s.points || 0), 0), unsized = L.filter((s) => s.points == null).length;
+    const tl = [d.sprints != null ? plural(d.sprints, 'sprint') : '', d.pis != null ? plural(d.pis, 'PI') : '', d.quarters != null ? plural(d.quarters, 'quarter') : ''].filter(Boolean).join(' ≈ ');
+    const cap = d.points_per_sprint != null ? 'assuming ' + d.points_per_sprint + ' points per sprint' : 'capacity not stated, so the timeline is an assumption';
+    const asm = d.assumptions || [];
+    return '<p class="cl-delivery"' + (d.basis ? ' title="' + esc(d.basis) + '"' : '') + '>Sized at <b>' + plural(pts, 'point') + '</b>' + (tl ? ' ≈ ' + tl : '') + ', ' + cap + '.' + (unsized ? ' ' + plural(unsized, 'story', 'stories') + ' still unsized.' : '') +
+      (asm.length ? ' ' + plural(asm.length, 'assumption') + ' carried:' : ' No assumptions carried.') + ' <button type="button" class="link" data-a="open-rules" data-k="8">Rule 8</button></p>' +
+      (asm.length ? '<ul class="asm cl-asm">' + asm.map((a) => '<li>' + mi(a) + '</li>').join('') + '</ul>' : '');
+  }
   function renderStories() {
     const L = S.draft.stories || [];
-    return head(plural(L.length, 'story', 'stories') + ', drafted for review', 'Drafted from your documents. Open a story to review it in the detail panel; descriptions and criteria show formatted — use the Write tab to edit. Edits stay in a draft until you <b>Save all</b>.', csvBtn('csv-stories')) +
-      '<ol class="cards" id="cards">' + L.map(storyCard).join('') + '</ol>' + nextRow();
+    return head(plural(L.length, 'story', 'stories') + ', drafted for review', 'Drafted from your documents and the delivery ledger. Open a story to review it in the detail panel; descriptions and criteria show formatted — use the Write tab to edit. Edits stay in a draft until you <b>Save all</b>.', csvBtn('csv-stories')) +
+      deliveryLine(L) + '<ol class="cards" id="cards">' + L.map(storyCard).join('') + '</ol>' + nextRow();
   }
 
   // ---------- 3. Test plan ----------
@@ -656,7 +673,15 @@
       S.stories = data.stories.map(ST.normStory); S.draft.stories = ST.clone(S.stories);
       const carried = ST.openAssumptions(S.clarify);
       S.delivery = ST.normDelivery(data.delivery) || { sprints: null, pis: null, quarters: null, points_per_sprint: null, basis: '', assumptions: [] };
-      if (AI.getConfig().dryRun) carried.forEach((a) => { if (S.delivery.assumptions.indexOf(a) === -1) S.delivery.assumptions.push(a); }); // the canned sample cannot know what you left open
+      if (AI.getConfig().dryRun) { // the canned sample cannot know what you confirmed or left open: follow the ledger
+        carried.forEach((a) => { if (S.delivery.assumptions.indexOf(a) === -1) S.delivery.assumptions.push(a); });
+        const tl = S.clarify.ledger.timeline;
+        if (tl.status === 'confirmed' && tl.value && ST.timelineFill(tl.value).sprints) {
+          const t = ST.timelineFill(tl.value), pts = S.stories.reduce((n, s) => n + (s.points || 0), 0), dev = Math.max(1, t.sprints - (t.pis || 0));
+          Object.assign(S.delivery, { sprints: t.sprints, pis: t.pis, quarters: t.quarters, points_per_sprint: Math.ceil(pts / dev), basis: 'Timeline as you confirmed it in Clarify; ' + pts + ' points over ' + dev + ' delivery sprints needs about ' + Math.ceil(pts / dev) + ' points per sprint.' });
+          S.delivery.assumptions = S.delivery.assumptions.filter((a) => !/fit one PI of 6 sprints/.test(a));
+        }
+      }
       S.clarify.assumptions = carried; S.clarify.status = 'done';
       S.plan = null; S.draft.plan = null; S.cases = []; S.draft.cases = null; S.results = {}; S.sampleResults = false; ui.write = {}; ui.subEdit = null; ui.sheet = null;
       S.sel = S.stories[0] && S.stories[0].id; S.step = STEP.stories; ui.enter = true;
@@ -805,6 +830,7 @@
     rt: (el) => { setRT(el.dataset.k, el.value); grow(el); },
     's-title': (el) => { curStory().title = el.value.replace(/\n/g, ' '); grow(el); },
     's-assignee': (el) => { curStory().assignee = el.value; },
+    's-sizing': (el) => { curStory().size_rationale = el.value; },
     's-labels': (el) => { const s = curStory(); s.labels = el.value.split(',').map((x) => x.trim()).filter(Boolean); const c = $('cats'); if (c) c.innerHTML = catsHtml(s.labels); },
     'assist-prompt': (el) => { (ui.assist[el.dataset.k] = ui.assist[el.dataset.k] || {}).prompt = el.value; },
     case: (el) => { const c = S.draft.cases[+el.dataset.k]; c[el.dataset.f] = el.value; },
@@ -813,6 +839,7 @@
   const C = {
     's-status': (el) => { curStory().status = el.value; render(); },
     's-priority': (el) => { curStory().priority = el.value; render(); },
+    's-points': (el) => { curStory().points = el.value === '' ? null : +el.value; render(); },
     'case-prio': (el) => { S.draft.cases[+el.dataset.k].priority = el.value; render(); },
     sample: (el) => { ST.setSampleResults(el.checked); ST.save(); render(); },
     file: (el) => { const f = el.files[0]; el.value = ''; readFile(f, el.dataset.k); },

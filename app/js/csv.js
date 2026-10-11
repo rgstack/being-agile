@@ -11,12 +11,15 @@
   }
   const toCsv = (header, rows) => [header].concat(rows).map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
 
+  // Description carries the stated assumptions so Jira shows them where a developer will meet them.
+  const withAssumptions = (s) => { const a = (s.assumptions || []).filter((x) => String(x).trim()); return (s.description || '') + (a.length ? '\n\nAssumptions:\n' + a.map((x) => '- ' + x).join('\n') : ''); };
   function storiesToCsv(stories) {
-    const head = ['Issue Type', 'Summary', 'Description', 'Acceptance Criteria', 'Priority', 'Labels', 'Assignee', 'Status', 'Subtasks'];
+    // "Story Points" is the header Jira's importer maps to its Story Points field by name.
+    const head = ['Issue Type', 'Summary', 'Description', 'Acceptance Criteria', 'Priority', 'Story Points', 'Labels', 'Assignee', 'Status', 'Subtasks'];
     return toCsv(head, stories.map((s) => [
-      'Story', s.title, s.description,
+      'Story', s.title, withAssumptions(s),
       (s.acceptance_criteria || []).map((a, i) => (i + 1) + '. ' + a).join('\n'),
-      JIRA_PRIORITY[s.priority] || s.priority,
+      JIRA_PRIORITY[s.priority] || s.priority, s.points == null ? '' : s.points,
       (s.labels || []).join(' '), // Jira importer splits labels on whitespace
       s.assignee || '', s.status,
       (s.subtasks || []).map((t) => (typeof t === 'string' ? t : t.text)).join('\n'),
