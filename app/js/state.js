@@ -38,7 +38,7 @@
     const status = LENS_STATUS.indexOf(l.status) !== -1 ? l.status : 'open';
     let value = l.value;
     if (k === 'stakeholders') value = Array.isArray(value) ? value.map((p) => (typeof p === 'string' ? { name: p, role: '', needs: '' } : { name: String(p && p.name || ''), role: String(p && p.role || ''), needs: String(p && p.needs || '') })).filter((p) => p.name) : [];
-    else if (k === 'timeline') value = value && typeof value === 'object' ? { sprints: num(value.sprints), pis: num(value.pis), quarters: num(value.quarters), note: String(value.note || '') } : (typeof value === 'string' && value ? { sprints: null, pis: null, quarters: null, note: value } : null);
+    else if (k === 'timeline') value = value && typeof value === 'object' ? { sprints: num(value.sprints), pis: num(value.pis), quarters: num(value.quarters), note: String(value.note || '') } : (typeof value === 'string' && value.trim() ? parseLens('timeline', value, null) : null);
     else value = typeof value === 'string' ? value : value == null ? '' : planItemText(value);
     const cites = Array.isArray(l.cites) ? l.cites.map((c) => (typeof c === 'string' ? { doc: '', heading: c } : { doc: String(c && c.doc || ''), heading: String(c && c.heading || '') })).filter((c) => c.doc || c.heading) : [];
     return { status, value, source: String(l.source || ''), cites };

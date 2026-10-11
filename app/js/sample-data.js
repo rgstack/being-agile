@@ -106,3 +106,63 @@ B.5 GET /audit (Auditor+): filters user/action/npi/from/to; cursor pagination (l
 B.6 Ops: /healthz, /readyz (NPPES outage affects detail, not readiness), /metrics (internal).
 B.7 Check digit: Luhn on "80840"+NPI; valid iff sum%10==0. Known-valid example: 1234567893.`
 };
+
+// ---------- Story sizing (rules 8) for the dry-run sample: points, a one-line rationale, stated assumptions, suggested sprint ----------
+(function () {
+  const SIZE = {
+    'US-001': [5, 'Shared validator plus one endpoint and four UI outcomes; well specified, low uncertainty.', ['Assumes: the shared validator package can be published to the internal registry in sprint 1'], 1],
+    'US-002': [5, 'Two search modes, filters and honest pagination against a probed upstream; moderate uncertainty on wildcard rules.', ['Assumes: NPPES wildcard and minimum-criteria rules stay as probed on 2026-10-05'], 2],
+    'US-003': [3, 'Read-only view over the mapper’s normalized model; mostly UI, fixtures already recorded.', [], 2],
+    'US-004': [8, 'Rate limiting, single-flight, circuit breaker and error mapping across Redis and in-process paths; the highest technical risk in Phase 1, at the ceiling.', ['Assumes: a shared Redis is available in staging during sprint 1 (REQ-011 limits are global)'], 1],
+    'US-005': [5, 'Tiered TTLs with stale-on-error; depends on the client in US-004, otherwise contained.', ['Assumes: the 24h / 1h / 15min TTLs are acceptable to Compliance without a separate sign-off'], 3],
+    'US-006': [5, 'Pure verification engine plus the evidence write path; the engine is unit-testable, the transaction is the risk.', ['Assumes: 7-year evidence retention is already provisioned in Postgres'], 4],
+    'US-007': [8, 'Async batch of 500 rows with queueing, cancellation and partial failure; Phase 2’s largest piece, at the ceiling not above it.', ['Assumes: Phase 2 (batch verification) is inside the planned PI', 'Assumes: the Data Steward team is the only batch user in Phase 2'], 5],
+    'US-008': [8, 'SSO, four roles and a fail-closed append-only audit log touch every endpoint; at the ceiling.', ['Assumes: the corporate OIDC client registration is granted before sprint 1 ends'], 3],
+  };
+  window.SAMPLE.stories.forEach((s) => { const z = SIZE[s.id]; if (z) { s.points = z[0]; s.size_rationale = z[1]; s.assumptions = z[2]; s.sprint = z[3]; } });
+})();
+// Derived timeline (rule 8.4): 47 points; capacity is not in the documents, so it is stated as an assumption.
+window.SAMPLE.delivery = {
+  sprints: 6, pis: 1, quarters: 1, points_per_sprint: 10,
+  basis: '47 points over the 5 delivery sprints of one PI needs about 10 points per sprint; the team’s capacity is not stated in the documents.',
+  assumptions: ['Assumes: team capacity of about 10 points per sprint (not stated in the documents)', 'Assumes: Phase 1 and Phase 2 together fit one PI of 6 sprints, read from the two six-week phases'],
+};
+
+// ---------- Clarify: the scripted dry-run conversation for the NPPES sample ----------
+// review: what the analyst wrote after reading the three documents. script: canned replies keyed by question id;
+// {answer} is replaced with what you typed (clarify.js records your words as the answer and confirms the lens).
+window.SAMPLE.clarify = {
+  review: {
+    brief: 'I read the PRD, the design doc and the API spec. I could place the stakeholders — five named users and a product owner — and I read a timeline out of the two six-week phases, though the PRD never says it in sprints. The value stream is not named anywhere, and I would like you to confirm who actually builds and runs this. Generate stories whenever you like; anything still open becomes a stated assumption.',
+    digest: 'Provider Lookup & NPI Verification: an internal tool that verifies provider NPIs against the public CMS NPPES Registry API v2.1 (unauthenticated, no SLA, undocumented limits). Department: Enrollment & Credentialing; PRD owner: Product, Provider Network Operations. Users: Dana (Enrollment Analyst, fast forgiving lookup), Marcus (Credentialing Specialist, time-stamped evidence), Priya (Provider Data Steward, batch verification and discrepancy exports), Lee (Compliance / Audit Liaison, searchable audit log), Sam (Platform Admin, access, cache and upstream load). No external or provider-facing access. Scope: REQ-001 direct NPI lookup with Luhn check digit (80840 prefix); REQ-002 individual search; REQ-003 organization search; REQ-004 filters and minimum-criteria guard; REQ-005 honest pagination (result_count is a page size, never a total); REQ-006 detail view with primary taxonomy and separated addresses; REQ-007 verification vs enrollment record (MATCH / MISMATCH / NOT_PROVIDED per field, evidence snapshot); REQ-008 batch verification up to 500 rows (Phase 2); REQ-009 error handling (NPPES returns validation errors as HTTP 200 + Errors[]); REQ-010 tiered caching with visible freshness (24h / 1h / 15min, errors never cached); REQ-011 upstream protection (server-side proxy only, 4 concurrent, 5 req/s token bucket, single-flight, circuit breaker); REQ-012 append-only audit trail and evidence snapshots (7-year retention); REQ-013 SSO (OIDC) with Viewer / Verifier / Auditor / Admin roles. Design: React SPA, stateless Node (Fastify) or JVM service, Redis, Postgres, OpenTelemetry. Phasing: Phase 1 pilot, target 6 weeks (all P0 requirements, 8–10 analysts and 2 specialists, exit gate on success criteria, no Sev-1/2, security review); Phase 2 department GA, +6 weeks (batch, discrepancy reporting, scheduled sweeps); Phase 3 integration, backlog subject to approval (credentialing-system write-back, bulk-file mirror). Feature flags per risky capability; rollback is flag-off plus the manual NPPES UI. Non-goals: not a credentialing system of record, no NPPES writes, no auto-correction, no bulk mirror, never imply licensure. Not stated: the value stream; which organisation builds and runs the service; an executive sponsor; team capacity in points per sprint.',
+    ledger: {
+      timeline: { status: 'assumed', value: { sprints: 6, pis: 1, quarters: 1, note: 'Phase 1 pilot 6 weeks (3 sprints) + Phase 2 GA 6 weeks (3 sprints); Phase 3 is backlog' }, source: 'read from weeks in PRD › 7. Rollout and phasing', cites: [{ doc: 'prd', heading: '7. Rollout and phasing' }] },
+      stakeholders: { status: 'found', value: [
+        { name: 'Dana', role: 'Enrollment Analyst', needs: 'Fast, forgiving lookup; confidence the NPI matches the application' },
+        { name: 'Marcus', role: 'Credentialing Specialist', needs: 'Defensible, time-stamped evidence of primary source verification' },
+        { name: 'Priya', role: 'Provider Data Steward', needs: 'Batch verification and exportable discrepancy lists' },
+        { name: 'Lee', role: 'Compliance / Audit Liaison', needs: 'Searchable audit log of every lookup and verdict' },
+        { name: 'Sam', role: 'Platform Admin', needs: 'Control over access, cache and upstream load' },
+        { name: 'Product, Provider Network Operations', role: 'Product owner', needs: 'Owns the PRD' },
+      ], source: 'PRD › 2. Target users and the Owner row', cites: [{ doc: 'prd', heading: '2. Target users' }] },
+      valueStream: { status: 'open', value: '', source: '', cites: [] },
+      businessArea: { status: 'assumed', value: 'Provider Network Operations', source: 'assumed from the PRD Owner row', cites: [{ doc: 'prd', heading: 'Product Requirements Document' }] },
+    },
+    questions: [
+      { id: 'Q1', lens: 'timeline', text: 'Phase 1 is a six-week pilot and Phase 2 adds six more weeks. Should I plan this as one PI of six sprints, or do you want Phase 3 in scope too?', why: 'The PRD gives weeks, not sprints, and leaves Phase 3 “subject to approval”. Story sizing and the timeline line on the Stories page depend on it.', options: ['One PI, Phases 1–2 only', 'Two PIs, include Phase 3'], default: 'One PI (6 sprints), Phases 1–2 only' },
+      { id: 'Q2', lens: 'valueStream', text: 'Which value stream does provider verification sit in: Provider onboarding, or Credentialing and re-credentialing?', why: 'The PRD names Enrollment & Credentialing as the department and Provider Network Operations as the owner, but never the value stream. Every story gets tagged with it.', options: ['Provider onboarding', 'Credentialing & re-credentialing'], default: '' },
+      { id: 'Q3', lens: 'stakeholders', text: 'Who is the executive sponsor who signs off the pilot exit gate?', why: 'The PRD names five user personas and a product owner, but nobody who signs off. Definition of Ready wants a name for that.', options: [], default: '' },
+      { id: 'Q4', lens: 'businessArea', text: 'Which delivery organisation will build and run this? The Owner row says Product, Provider Network Operations, which may be the product owner rather than the builders.', why: 'The business area decides who the stories are written for and who carries the on-call and audit duties in REQ-011 and REQ-012.', options: ['Provider Network Operations', 'Provider Data Management (IT)'], default: 'Provider Network Operations' },
+      { id: 'Q5', lens: 'timeline', text: 'Does the six-week Phase 1 include the pilot with the 8–10 analysts, or does the pilot start when the six weeks end?', why: 'It is one sprint either way, but it moves the PI boundary and the exit gate.', options: ['Pilot is inside the six weeks', 'Pilot starts after the six weeks'], default: 'Pilot is inside the six weeks' },
+    ],
+  },
+  script: {
+    Q1: { reply: 'Got it — {answer}. I’ll size every story to fit that and say so on the Stories page.' },
+    Q2: { reply: '{answer} it is. Every story gets tagged with it.' },
+    Q3: { reply: 'Thanks — I’ve added {answer} as the sponsor who signs off the pilot.', role: 'Executive sponsor', needs: 'Signs off the pilot exit gate' },
+    Q4: { reply: 'Noted — {answer} builds and runs it; the stories are written for that team.' },
+    Q5: { reply: 'Understood — {answer}. That settles the PI boundary.' },
+    aside: 'Noted — I’ll carry that into the stories. Back to the question.',
+    done: 'That’s everything I needed to ask. Keep typing if something comes to mind, or generate the stories whenever you’re ready.',
+  },
+};
