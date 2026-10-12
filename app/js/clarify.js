@@ -53,7 +53,7 @@
       else if (total) parts.push(open ? X.plural(open, 'question') + ' open' : 'nothing more to ask');
     }
     const convoTog = (VO() && !AI.getConfig().dryRun && U.voiceConvo) ? ' <span aria-hidden="true">·</span> <button type="button" class="cl-textmode" data-a="cl-textmode" title="Stop voice and return to typing">Text mode</button>' : '';
-    return '<p class="cl-head">' + parts.map(esc).join(' <span aria-hidden="true">·</span> ') + (VO() ? ' <span aria-hidden="true">·</span> ' + VO().dot() : '') + convoTog + '</p>';
+    return '<p class="cl-head">' + parts.map(esc).join(' <span aria-hidden="true">·</span> ') + convoTog + '</p>';
   }
   const staleNote = (c) => (stale(c) && !U.staleOk ? '<p class="cl-stale" role="status">Documents changed since this review. <button class="link" data-a="cl-rereview">Re-review</button> <span aria-hidden="true">·</span> <button class="link" data-a="cl-keep">Keep going</button></p>' : '');
   // A turn that began as speech shows the local voice price (nothing) in place of the API estimate; the usage meter still records the call.
@@ -372,13 +372,11 @@
     if (!V.ready()) { X.toast(V.HINT); V.health(); return; }
     V.speak(t.text, id, (err) => { if (err) X.toast(err); });
   }
-  // Health flips patch the dot and buttons in place (no re-render, so typing is never disturbed); capture/playback states re-render.
+  // Health flips patch the mic button in place (no re-render, so typing is never disturbed); capture states re-render.
   function syncVoiceDom() {
     const V = VO(); if (!V || !document.querySelector('.clarify')) return;
     const dry = dryRun();
-    const d = document.querySelector('.cl-vdot'); if (d) d.outerHTML = V.dot();
     const m = document.querySelector('.cl-mic'); if (m) m.outerHTML = V.mic({ disabled: U.busy, dry });
-    document.querySelectorAll('.cl-speak').forEach((b) => { b.outerHTML = V.speaker(b.dataset.k, { dry }); });
   }
   function voiceChanged(what, snap) {
     if (!document.querySelector('.clarify')) return;

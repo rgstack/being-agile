@@ -144,7 +144,7 @@ test('Clarify dry-run: mic inserts scripted text with a note, no sidecar call; v
   CL.init({ getS: () => S, ui: { busy: false }, render() {}, touch() {}, toast: (m) => toasts.push(m), confirmBox: async () => true, guarded: async () => false, go() {}, genStories() {}, esc: (v) => String(v == null ? '' : v), mi: (v) => String(v), ic: () => '', fmtUsd: (n) => '$' + n.toFixed(2), plural: (n, o) => n + ' ' + o, errBox: () => '', apiHost: () => 'api.openai.com', openDoc() {}, openRules() {} });
   w.OpenAI.configure({ dryRun: true });
   const html = CL.render();
-  assert.match(html, /class="cl-vdot"/);
+  assert.doesNotMatch(html, /class="cl-vdot"/); // no voice status dot in the header (design rule, Oct 12 2026)
   assert.match(html, /data-a="cl-mic"/);
   assert.doesNotMatch(html, /data-a="cl-speak"/); // AI is text-only (product rule, Oct 12 2026): replies get no speaker button
   assert.match(html, /local voice · \$0\.00/);

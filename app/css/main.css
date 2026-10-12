@@ -171,13 +171,6 @@ a { color: inherit; }
 
 .proof { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--line); }
 .proof-h { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px; color: var(--ink-3); margin-bottom: 6px; }
-.proof-row { display: flex; justify-content: space-between; margin: 0 -3px; }
-.proof-row button { padding: 6px 3px; border-radius: 6px; display: grid; place-items: center; position: relative; }
-.proof-row button::after { content: ""; position: absolute; left: 3px; right: 3px; bottom: 0; height: 2px; border-radius: 2px; background: var(--ink); transform: scaleX(0); transition: transform .25s var(--ease); }
-.proof-row button[aria-pressed="true"]::after { transform: scaleX(1); }
-.proof-row button:hover .mark { transform: scale(1.25); }
-.proof-row.focus button:not(.rel) .mark { opacity: .22; }
-.proof-row .mark { transition: background-color .35s var(--ease), box-shadow .35s var(--ease), border-radius .35s var(--ease), transform .2s var(--ease), opacity .2s; }
 .proof-c { font-size: 12.5px; color: var(--ink-2); margin-top: 6px; line-height: 1.4; }
 
 /* top bar */
@@ -368,10 +361,6 @@ button.chip[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); 
 .cl-composer .ai-hint, .cl-composer .cl-dry { margin: 8px 2px 0; }
 
 /* voice (optional local sidecar): header dot, mic in the composer, speaker on each reply */
-.cl-vdot { display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: .02em; font-weight: 500; }
-.cl-vdot i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); opacity: .55; }
-.cl-vdot[data-ok="1"] i { background: var(--ok); opacity: 1; box-shadow: 0 0 0 3px var(--ok-wash); }
-.cl-vdot[data-ok="1"] { color: var(--ok-ink); }
 .cl-mic { flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line-2); color: var(--ink-2); background: var(--paper); transition: border-color .15s, background-color .15s, color .15s; }
 .cl-mic .ic { width: 16px; height: 16px; }
 .cl-mic:hover { border-color: var(--ink); color: var(--ink); background: var(--wash); }
@@ -451,7 +440,7 @@ button.chip[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); 
   .cl-composer { padding-bottom: 6px; }
 }
 @media print {
-  .cl-composer, .cl-cta, .cl-chips, .cl-skip, .lens-acts, .cl-think, .cl-err, .cl-speak, .cl-vdot, .cl-textmode, .cl-heard { display: none !important; }
+  .cl-composer, .cl-cta, .cl-chips, .cl-skip, .lens-acts, .cl-think, .cl-err, .cl-speak, .cl-textmode, .cl-heard { display: none !important; }
   .clarify { display: block; }
   .clarify > .ledger { position: static; border: 1px solid var(--line-2); padding: 12px 16px 4px; margin: 0 0 24px; break-inside: avoid-page; }
   .turn.ask.cur .cl-qt { font-size: 22px; }
@@ -889,7 +878,6 @@ tr.new td { animation: flash 1.6s var(--ease); }
 .boot .side .brand, .boot .side .stages, .boot .side .proof { animation: rise .6s var(--ease) both; }
 .boot .side .stages { animation-delay: .05s; }
 .boot .side .proof { animation-delay: .1s; }
-.boot .proof-row .mark { animation: markin .45s var(--ease) both; animation-delay: calc(var(--k) * 40ms + 350ms); }
 .bump { animation: bump .5s var(--ease); }
 @keyframes bump { 40% { transform: scale(1.5); } }
 
@@ -918,8 +906,6 @@ tr.new td { animation: flash 1.6s var(--ease); }
   .stage-link[aria-current="page"]::after { content: ""; position: absolute; left: 7px; right: 7px; bottom: -1px; height: 1.5px; background: var(--ink); }
   .proof { grid-row: 2; grid-column: 2; margin: 0; padding: 0 16px 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--side); display: flex; align-items: center; }
   .proof-h, .proof-c { display: none; }
-  .proof-row { gap: 0; margin: 0; }
-  .proof-row button { padding: 8px 2px; }
   .stage { grid-row: 3; grid-column: 1 / -1; --sheet-w: min(100%, 640px); }
   .stage[data-sheet="doc"] { --sheet-w: min(100%, 760px); }
   .stage.open .view { right: 0; }
@@ -931,8 +917,6 @@ tr.new td { animation: flash 1.6s var(--ease); }
   .app { grid-template-rows: 52px 44px 30px minmax(0, 1fr); }
   .stages { grid-column: 1 / -1; }
   .proof { grid-row: 3; grid-column: 1 / -1; justify-content: center; border-top: 0; padding: 0 12px; }
-  .proof-row { width: 100%; max-width: 340px; justify-content: space-between; }
-  .proof-row button { padding: 6px 3px; }
   .stage { grid-row: 4; }
   .save-state { display: none; }
   .page { padding: 28px 20px 96px; }
@@ -967,20 +951,12 @@ tr.new td { animation: flash 1.6s var(--ease); }
 .stage-link[disabled] { opacity: .4; cursor: not-allowed; }
 .stage-link[disabled]:hover .l { color: inherit; }
 .stage-link:disabled { color: var(--ink-2); }
-.proof-row button { padding: 6px 2px; }
-.proof-row .mark[data-v="notrun"] { box-shadow: inset 0 0 0 1.4px var(--ink-3); }
 
 /* top bar extras */
-.top-marks { display: inline-flex; align-items: center; margin-left: 4px; }
-.top-marks button { padding: 8px 2px; display: grid; place-items: center; border-radius: 4px; }
-.top-marks .mark { --s: 8px; vertical-align: 0; }
-.top-marks button:hover .mark { transform: scale(1.35); }
-.top-marks .mark[data-v="notrun"] { box-shadow: inset 0 0 0 1.2px var(--ink-3); }
 .tokmeter { font: 12px var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .top .btn .count { margin-left: 2px; }
 .top .btn { height: 32px; font-size: 14px; }
 .icon-btn[aria-expanded="true"] { background: var(--wash); color: var(--ink); }
-@media (max-width: 1299px) { .top-marks { display: none; } }
 @media (max-width: 899px) { .tokmeter { display: none; } }
 
 /* marks: not-run is hollow ink (the design's default), verdict classes reused in tables */

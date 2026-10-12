@@ -125,9 +125,9 @@
     const key = ids.join(',');
     if (key === reqKey) return;
     reqKey = key;
-    const btn = (id, k, cls) => '<button data-a="trace" data-k="' + id + '" aria-pressed="false" title="' + esc(id + (REQ_NAME[id] ? ' · ' + REQ_NAME[id] : '')) + '" aria-label="' + esc(id + (REQ_NAME[id] ? ', ' + REQ_NAME[id] : '')) + '"><i class="mark" data-reqmark="' + id + '" style="--k:' + k + '"></i></button>';
-    $('proof').innerHTML = '<div class="proof-h"><span>Proof so far</span><span>' + ids.length + ' requirements</span></div><div class="proof-row" role="group" aria-label="Requirements">' + ids.map((id, k) => btn(id, k)).join('') + '</div><div class="proof-c" id="proofc"></div>';
-    $('top-marks').innerHTML = ids.map((id, k) => btn(id, k)).join('');
+    // No per-requirement dot buttons (design rule, Oct 12 2026: the rows of filling
+    // circles at the top / sidebar foot read as clutter). The counts stay as text.
+    $('proof').innerHTML = '<div class="proof-h"><span>Proof so far</span><span>' + ids.length + ' requirements</span></div><div class="proof-c" id="proofc"></div>';
   }
   function marks() {
     document.querySelectorAll('[data-reqmark]').forEach((m) => {
@@ -135,7 +135,7 @@
       if (m.dataset.v && m.dataset.v !== v) { m.classList.remove('bump'); void m.offsetWidth; m.classList.add('bump'); }
       m.dataset.v = v;
     });
-    document.querySelectorAll('.proof-row button, .top-marks button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.k === ui.trace)));
+    document.querySelectorAll('.proof-row button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.k === ui.trace)));
   }
   function chromeSave() {
     const n = dirtyKinds().length, st = $('savestate'), b = $('saveall');
