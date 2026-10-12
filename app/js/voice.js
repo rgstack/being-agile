@@ -17,7 +17,7 @@
   const setState = (s) => { if (V.state !== s) { V.state = s; emit('state'); } };
   const withTimeout = (ms) => (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined);
   const HINT = 'Start the voice sidecar: python3 sidecar/voice_server.py';
-  const getVoice = () => { try { return localStorage.getItem('ba_voice') || 'lessac'; } catch (e) { return 'lessac'; } };
+  const getVoice = () => { try { return localStorage.getItem('ba_voice') || ''; } catch (e) { return ''; } }; // '' = the sidecar's default (Kokoro)
 
   // ---------- health ----------
   async function health() {
@@ -177,25 +177,40 @@
   // Read `text` aloud; `id` tags the message so the UI can show which one is playing. Pressing the same one again stops it.
   // cb(err) fires when playback starts (or fails to start); onEnded(ok) fires when playback naturally
   // ends (ok=true) or errors mid-play (ok=false). A manual stopAudio() never fires onEnded.
+  // Sentence by sentence: the first plays as soon as it is ready while the next is synthesised, so a long
+  // reply starts quickly and each sentence gets its own natural phrasing.
+  const sentences = (t) => String(t || '').replace(/\s+/g, ' ').trim().split(/(?<=[.!?…][”’"')]*)\s+(?=[A-Z0-9“"‘'(])/).filter(Boolean);
+  function fetchTts(text) {
+    const p = Promise.resolve().then(() => fetch(BASE + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice: getVoice() }) }))
+      .then(async (r) => { if (!r.ok) { let j = null; try { j = await r.json(); } catch (e) { j = null; } throw new Error((j && j.error) || ('Sidecar replied ' + r.status)); } return r.blob(); });
+    p.catch(() => {}); // a prefetch nobody awaits (playback stopped) must not surface as unhandled
+    return p;
+  }
   async function speak(text, id, cb, onEnded) {
     cb = cb || function () {};
     if (V.speaking === id) { stopAudio(); return false; }
     stopAudio();
     if (!V.ok) { cb(HINT); return false; }
     V.speaking = id; V.state = 'tts'; emit('state');
-    try {
-      const r = await fetch(BASE + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: String(text || ''), voice: getVoice() }) });
-      if (!r.ok) { let j = null; try { j = await r.json(); } catch (e) { j = null; } throw new Error((j && j.error) || ('Sidecar replied ' + r.status)); }
-      const blob = await r.blob();
+    V.ttsEndCb = (typeof onEnded === 'function') ? onEnded : null;
+    const parts = sentences(text);
+    if (!parts.length) parts.push(String(text || ''));
+    const finish = (ok) => { if (V.speaking !== id) return; const f = V.ttsEndCb; stopAudio(); if (f) { try { f(ok); } catch (e) { /* listener must never break playback */ } } };
+    const playFrom = async (i, pending) => {
+      const blob = await pending;
       if (V.speaking !== id) return false; // stopped while fetching
       if (typeof Audio === 'undefined') throw new Error('Audio playback is not available here.');
+      const next = i + 1 < parts.length ? fetchTts(parts[i + 1]) : null;
       const a = new Audio(URL.createObjectURL(blob));
+      if (V.audio && V.audio.src) { try { URL.revokeObjectURL(V.audio.src); } catch (e) { /* ignore */ } }
       V.audio = a;
-      V.ttsEndCb = (typeof onEnded === 'function') ? onEnded : null;
-      const done = (ok) => { if (V.audio === a) { const f = V.ttsEndCb; stopAudio(); if (f) { try { f(ok); } catch (e) { /* listener must never break playback */ } } } };
-      a.onended = () => done(true);
-      a.onerror = () => done(false);
+      a.onended = () => { if (V.audio !== a) return; if (!next) finish(true); else playFrom(i + 1, next).catch(() => finish(false)); };
+      a.onerror = () => { if (V.audio === a) finish(false); };
       await a.play();
+      return true;
+    };
+    try {
+      if (!(await playFrom(0, fetchTts(parts[0])))) return false;
       cb(null);
       return true;
     } catch (e) { stopAudio(); cb((e && e.message) || String(e)); return false; }

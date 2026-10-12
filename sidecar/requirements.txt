@@ -1,4 +1,5 @@
-# Being Agile voice sidecar. Install once: python3 -m pip install -r sidecar/requirements.txt
+# Being Agile voice sidecar (Python 3.10+ for Kokoro). Install once: python3 -m pip install -r sidecar/requirements.txt
 # Then: python3 sidecar/download_models.py && python3 sidecar/voice_server.py
 faster-whisper==1.2.1
 piper-tts==1.8.0
+kokoro-onnx==0.6.1

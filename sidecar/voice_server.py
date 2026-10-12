@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Being Agile voice sidecar: local speech-to-text (faster-whisper) and text-to-speech (Piper).
+"""Being Agile voice sidecar: local speech-to-text (faster-whisper) and text-to-speech (Kokoro, Piper fallback).
 
 Runs on 127.0.0.1:8099 only. The browser app POSTs audio here and gets text back, or POSTs text
 and gets WAV back; nothing leaves the machine. The LLM turn itself never passes through here.
 
-  GET  /health                        -> {"ok": true, "stt": "faster-whisper-base", "tts": "piper", "voices": ["lessac", ...]}
+  GET  /health                        -> {"ok": true, "stt": "faster-whisper-base", "tts": "kokoro", "voices": ["af_heart", ..., "lessac", ...]}
   POST /stt  (audio body)             -> {"text": "..."}      WAV preferred; anything PyAV decodes is accepted
-  POST /tts  {"text":..., "voice":..} -> audio/wav bytes      voice defaults to "lessac"
+  POST /tts  {"text":..., "voice":..} -> audio/wav bytes      voice defaults to Kokoro af_heart (Piper lessac if Kokoro is absent)
+
+Kokoro (82M, Apache 2.0) sounds far more natural than Piper and still runs on the CPU; it needs
+Python 3.10+ and kokoro-onnx. A Piper voice name ("lessac", "amy", ...) still selects Piper.
 
 Models are read from sidecar/models/ (run download_models.py once). Missing models or packages
 give a clear JSON error instead of a crash, so the app can keep working in text mode.
@@ -14,7 +17,9 @@ give a clear JSON error instead of a crash, so the app can keep working in text 
 import io
 import json
 import os
+import re
 import sys
+import threading
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -28,12 +33,17 @@ TTS_VOICES = {
     "kristin": "en_US-kristin-medium",
     "ryan":    "en_US-ryan-medium",
 }
+KOKORO_MODEL = os.path.join(MODELS, "kokoro-v1.0.onnx")  # fp32: on x86 CPUs it is faster than the int8 file
+KOKORO_VOICES = os.path.join(MODELS, "voices-v1.0.bin")
+KOKORO_DEFAULT = os.environ.get("VOICE_DEFAULT", "af_heart")
+KOKORO_SPEED = float(os.environ.get("VOICE_SPEED", "1.0"))
 LANG = os.environ.get("VOICE_LANG", "en")
 HINT = "run: python3 sidecar/download_models.py"
 INSTALL = "run: python3 -m pip install -r sidecar/requirements.txt"
 
 STT = {"model": None, "err": None}
-TTS = {"cache": {}, "err": None, "available": []}  # cache: name -> PiperVoice; available: names with model files present
+TTS = {"cache": {}, "err": None, "available": []}  # cache: name -> PiperVoice; available: Piper names with model files present
+KOKORO = {"model": None, "voices": [], "err": None, "lock": threading.Lock()}
 
 
 def load_models():
@@ -49,6 +59,17 @@ def load_models():
         STT["err"] = "%s: %s" % (type(e).__name__, e)
     try:
         try:
+            from kokoro_onnx import Kokoro
+        except ImportError:
+            raise ImportError("kokoro-onnx is not installed (needs Python 3.10+) — " + INSTALL)
+        if not (os.path.isfile(KOKORO_MODEL) and os.path.isfile(KOKORO_VOICES)):
+            raise FileNotFoundError("Kokoro model files not found in " + MODELS + " — " + HINT)
+        KOKORO["model"] = Kokoro(KOKORO_MODEL, KOKORO_VOICES)
+        KOKORO["voices"] = sorted(v for v in KOKORO["model"].get_voices() if v[:2] in ("af", "am", "bf", "bm"))  # English voices
+    except Exception as e:  # Piper still serves
+        KOKORO["err"] = "%s: %s" % (type(e).__name__, e)
+    try:
+        try:
             from piper import PiperVoice  # noqa: F401 — just verify import
         except ImportError:
             raise ImportError("piper-tts is not installed — " + INSTALL)
@@ -56,7 +77,7 @@ def load_models():
             onnx = os.path.join(MODELS, base + ".onnx")
             if os.path.isfile(onnx) and os.path.isfile(onnx + ".json"):
                 TTS["available"].append(short)
-        if not TTS["available"]:
+        if not TTS["available"] and not KOKORO["model"]:
             raise FileNotFoundError("No TTS voice files found in " + MODELS + " — " + HINT)
     except Exception as e:
         TTS["err"] = "%s: %s" % (type(e).__name__, e)
@@ -78,6 +99,50 @@ def get_voice(name):
 def transcribe(audio_bytes):
     segments, _info = STT["model"].transcribe(io.BytesIO(audio_bytes), language=LANG or None, beam_size=1, vad_filter=True)
     return " ".join(s.text.strip() for s in segments).strip()
+
+
+# Spoken-English clean-up shared by both engines: ranges, acronyms the model would read as words, symbols.
+SAY = [
+    (re.compile(r"(\d)\s*[–—-]\s*(\d)"), r"\1 to \2"),
+    (re.compile(r"\bPIs\b"), "P.I.s"), (re.compile(r"\bPI\b"), "P.I."),
+    (re.compile(r"\bNPIs\b"), "N.P.I.s"), (re.compile(r"\bNPI\b"), "N.P.I."),
+    (re.compile(r"\bAPI\b"), "A.P.I."), (re.compile(r"\bPRD\b"), "P.R.D."), (re.compile(r"\bSSO\b"), "S.S.O."),
+    (re.compile(r"\bREQ-0*(\d+)\b"), r"requirement \1"),
+    (re.compile(r"\s*&\s*"), " and "), (re.compile(r"\s*[•·]\s*"), ", "), (re.compile(r"[*_#`]+"), ""),
+]
+
+
+def speakable(text):
+    for rx, sub in SAY:
+        text = rx.sub(sub, text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def synthesize_kokoro(text, voice):
+    import numpy as np
+    with KOKORO["lock"]:  # one synthesis at a time: they share the CPU anyway
+        samples, sr = KOKORO["model"].create(text, voice=voice, speed=KOKORO_SPEED, lang="en-gb" if voice[:1] == "b" else "en-us")
+    pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(pcm)
+    return buf.getvalue()
+
+
+def tts(text, name):
+    """Kokoro unless a Piper voice is asked for by name (or Kokoro is unavailable)."""
+    text = speakable(text)
+    if KOKORO["model"] and name not in TTS["available"]:
+        voice = name if name in KOKORO["voices"] else (KOKORO_DEFAULT if KOKORO_DEFAULT in KOKORO["voices"] else KOKORO["voices"][0])
+        return synthesize_kokoro(text, voice)
+    return synthesize(text, get_voice(name))
+
+
+def tts_ready():
+    return bool(KOKORO["model"] or TTS["available"])
 
 
 def synthesize(text, voice):
@@ -118,8 +183,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.split("?")[0] != "/health":
             return self._json(404, {"error": "not found"})
-        ok = STT["model"] is not None and bool(TTS["available"])
-        out = {"ok": ok, "stt": "faster-whisper-base" if STT["model"] else None, "tts": "piper" if TTS["available"] else None, "voices": TTS["available"]}
+        ok = STT["model"] is not None and tts_ready()
+        engine = "kokoro" if KOKORO["model"] else "piper" if TTS["available"] else None
+        out = {"ok": ok, "stt": "faster-whisper-base" if STT["model"] else None, "tts": engine, "voices": KOKORO["voices"] + TTS["available"]}
         if not ok:
             out["error"] = "; ".join(e for e in (STT["err"], TTS["err"]) if e)
         self._json(200, out)
@@ -135,17 +201,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(400, {"error": "empty audio"})
                 return self._json(200, {"text": transcribe(audio)})
             if path == "/tts":
-                if not TTS["available"]:
+                if not tts_ready():
                     return self._json(503, {"error": "text-to-speech unavailable: " + (TTS["err"] or HINT)})
                 try:
                     body = json.loads(self._body().decode("utf-8") or "{}")
                 except ValueError:
                     return self._json(400, {"error": "body must be JSON {\"text\": ...}"})
                 text = str(body.get("text") or "").strip()
-                voice_name = str(body.get("voice") or "lessac").strip()
+                voice_name = str(body.get("voice") or "").strip()
                 if not text:
                     return self._json(400, {"error": "empty text"})
-                wav = synthesize(text[:4000], get_voice(voice_name))
+                wav = tts(text[:4000], voice_name)
                 self.send_response(200)
                 self._cors()
                 self.send_header("Content-Type", "audio/wav")
@@ -165,7 +231,8 @@ if __name__ == "__main__":
     print("Loading models from", MODELS, "...", flush=True)
     load_models()
     print("  STT: %s" % ("ready" if STT["model"] else "UNAVAILABLE — " + STT["err"]), flush=True)
-    print("  TTS: %s" % ("voices available: " + ", ".join(TTS["available"]) if TTS["available"] else "UNAVAILABLE — " + TTS["err"]), flush=True)
+    print("  TTS: %s" % ("Kokoro (default %s)" % KOKORO_DEFAULT if KOKORO["model"] else "Kokoro unavailable — " + str(KOKORO["err"])), flush=True)
+    print("       %s" % ("Piper fallback: " + ", ".join(TTS["available"]) if TTS["available"] else "Piper unavailable — " + str(TTS["err"])), flush=True)
     print("Voice sidecar on http://%s:%d  (Ctrl+C to stop)" % (HOST, PORT), flush=True)
     try:
         ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

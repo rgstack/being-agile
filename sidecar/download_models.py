@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Fetch the two voice models into sidecar/models/ (one-time, ~150 MB + ~65 MB).
+"""Fetch the voice models into sidecar/models/ (one-time, ~150 MB + ~350 MB + ~65 MB).
 
   faster-whisper base  -> models/faster-whisper-base/   (Systran/faster-whisper-base on Hugging Face)
-  Piper en_US-lessac-medium -> models/en_US-lessac-medium.onnx + .onnx.json (rhasspy/piper-voices)
+  Kokoro v1.0          -> models/kokoro-v1.0.onnx + voices-v1.0.bin   (thewh1teagle/kokoro-onnx releases)
+  Piper en_US-lessac-medium -> models/en_US-lessac-medium.onnx + .onnx.json (rhasspy/piper-voices; fallback)
 
 Needs the packages in requirements.txt (huggingface_hub comes with faster-whisper). Re-running skips
 files that already exist. This is the only step that reaches the network; the server never does.
@@ -16,6 +17,8 @@ MODELS = os.path.join(HERE, "models")
 STT_REPO, STT_DIR = "Systran/faster-whisper-base", os.path.join(MODELS, "faster-whisper-base")
 PIPER_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/"
 PIPER_FILES = ["en_US-lessac-medium.onnx", "en_US-lessac-medium.onnx.json"]
+KOKORO_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
+KOKORO_FILES = ["kokoro-v1.0.onnx", "voices-v1.0.bin"]
 
 
 def fetch(url, dest):
@@ -42,7 +45,10 @@ def main():
         sys.exit("huggingface_hub missing — pip install -r sidecar/requirements.txt first")
     snapshot_download(STT_REPO, local_dir=STT_DIR, allow_patterns=["*.bin", "*.json", "*.txt", "*.model"])
     print("  ->", STT_DIR)
-    print("Text-to-speech: Piper en_US-lessac-medium")
+    print("Text-to-speech: Kokoro v1.0")
+    for name in KOKORO_FILES:
+        fetch(KOKORO_BASE + name, os.path.join(MODELS, name))
+    print("Text-to-speech fallback: Piper en_US-lessac-medium")
     for name in PIPER_FILES:
         fetch(PIPER_BASE + name, os.path.join(MODELS, name))
     print("Done. Start the sidecar with: python3 sidecar/voice_server.py")

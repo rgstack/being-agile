@@ -183,3 +183,28 @@ test('Clarify: arriving starts the review, and the analyst opens by playing back
   assert.doesNotMatch(CL.render(), /class="cl-brief/); // the play-back lives in the conversation, not above it
   w.Voice.watch(false); w.close(); // onEnter started the /health poll
 });
+
+test('tts streams sentence by sentence: the next is fetched while one plays; onEnded fires after the last', async () => {
+  const bodies = [];
+  const fetchImpl = (url, opts) => {
+    if (url.endsWith('/health')) return up(url);
+    if (url.endsWith('/tts')) { bodies.push(JSON.parse(opts.body)); return { ok: true, status: 200, blob: async () => new Blob([new Uint8Array(64)], { type: 'audio/wav' }), json: async () => ({}) }; }
+    return jsonRes(404, {});
+  };
+  const { w } = boot(fetchImpl);
+  const played = [];
+  w.Audio = class { constructor(s) { this.src = s; played.push(this); } play() { return Promise.resolve(); } pause() {} };
+  const V = w.Voice;
+  await V.health();
+  let ended = null;
+  assert.equal(await V.speak('So, if I’ve got this right, you want a lookup tool. I have 5 questions. Ready?', 'say1', null, (ok) => { ended = ok; }), true);
+  assert.deepEqual(bodies.map((b) => b.text), ['So, if I’ve got this right, you want a lookup tool.', 'I have 5 questions.']); // first playing, second prefetched
+  assert.equal(bodies[0].voice, ''); // no stored choice: the sidecar picks its default (Kokoro)
+  played[0].onended(); await new Promise((r) => setTimeout(r, 0));
+  assert.equal(bodies.length, 3); assert.equal(ended, null);
+  played[1].onended(); await new Promise((r) => setTimeout(r, 0));
+  assert.equal(ended, null);
+  played[2].onended();
+  assert.equal(ended, true);
+  assert.equal(V.state().speaking, null);
+});
