@@ -904,8 +904,7 @@ tr.new td { animation: flash 1.6s var(--ease); }
   .stage-link .m { display: none; }
   .stage-link .l { line-height: 1; }
   .stage-link[aria-current="page"]::after { content: ""; position: absolute; left: 7px; right: 7px; bottom: -1px; height: 1.5px; background: var(--ink); }
-  .proof { grid-row: 2; grid-column: 2; margin: 0; padding: 0 16px 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--side); display: flex; align-items: center; }
-  .proof-h, .proof-c { display: none; }
+  .proof { display: none; }
   .stage { grid-row: 3; grid-column: 1 / -1; --sheet-w: min(100%, 640px); }
   .stage[data-sheet="doc"] { --sheet-w: min(100%, 760px); }
   .stage.open .view { right: 0; }
@@ -914,10 +913,9 @@ tr.new td { animation: flash 1.6s var(--ease); }
   .page { padding: 36px 28px 96px; }
 }
 @media (max-width: 700px) {
-  .app { grid-template-rows: 52px 44px 30px minmax(0, 1fr); }
+  .app { grid-template-rows: 52px 44px minmax(0, 1fr); }
   .stages { grid-column: 1 / -1; }
-  .proof { grid-row: 3; grid-column: 1 / -1; justify-content: center; border-top: 0; padding: 0 12px; }
-  .stage { grid-row: 4; }
+  .stage { grid-row: 3; }
   .save-state { display: none; }
   .page { padding: 28px 20px 96px; }
   .title { font-size: 30px; }
