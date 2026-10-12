@@ -7,7 +7,9 @@
    Shape: an IIFE like the other modules; screens.js hands it a slice of its closure via init() and merges
    actions/inputs/changes (all prefixed cl-) into its own delegation maps. Persisted state lives in S.clarify.
    Voice (voice.js, optional): the mic drops transcribed text into the composer as if typed, so it is edited and
-   sent through the same turn(); replies get a speaker button. Turns that began as speech are marked voice:true. */
+   sent through the same turn(). Turns that began as speech are marked voice:true. The AI itself is TEXT-ONLY
+   (product rule, Oct 12 2026): replies are never read aloud, there is no speaker button, and the hands-free
+   voice-conversation machinery below is dormant — it stays in the file, disabled, for reversibility. */
 (function () {
   'use strict';
   const ST = window.State, AI = window.OpenAI;
@@ -89,8 +91,8 @@
       return '<li class="turn ask settled' + anim + '" id="' + t.id + '"><span class="cl-n" aria-hidden="true">' + n + '</span><div class="cl-q"><p class="cl-qt"><span class="vh">Question ' + n + ': </span>' + esc(q.text) + '</p>' + st + '</div></li>';
     }
     if (t.kind === 'you') return '<li class="turn you' + anim + '" id="' + t.id + '"><span class="cl-n" aria-hidden="true"></span><div class="cl-you"><span class="cl-who">You</span><p>' + esc(t.text) + '</p></div></li>';
-    const spk = VO() && t.text ? ' ' + VO().speaker(t.id, { dry: AI.getConfig().dryRun }) : '';
-    return '<li class="turn say' + anim + '" id="' + t.id + '"><span class="cl-n" aria-hidden="true"></span><div class="cl-say"><p><span class="vh">Analyst: </span>' + X.mi(t.text) + '</p>' + spk + costLine(t.cost) + '</div></li>';
+    // No speaker button: AI replies are text-only (product rule, Oct 12 2026).
+    return '<li class="turn say' + anim + '" id="' + t.id + '"><span class="cl-n" aria-hidden="true"></span><div class="cl-say"><p><span class="vh">Analyst: </span>' + X.mi(t.text) + '</p>' + costLine(t.cost) + '</div></li>';
   }
   // The "what I heard" box. Rendered as a placeholder the moment recording starts so that
   // live partials can patch it in place without a full re-render (which would drop composer focus).
@@ -382,11 +384,8 @@
     if (!document.querySelector('.clarify')) return;
     if (what === 'health') {
       syncVoiceDom();
-      // auto-start when the sidecar first comes online (or recovers) while Clarify is open
-      if (snap.ok && !U.voiceConvo && !dryRun()) {
-        U.voiceConvo = true; U.convoRetries = 0;
-        convoMaybeSpeak();
-      }
+      // Product rule (Oct 12 2026): the AI is text-only. Voice conversation mode never
+      // auto-starts; the sidecar coming online only enables the composer's mic.
     } else if (what === 'partial') { U.liveHeard = (snap && snap.partialText) || ''; syncHeardDom(); }
     else X.render();
   }
@@ -523,13 +522,9 @@
   const onEnter = () => {
     if (VO()) VO().watch(true, () => !!document.querySelector('.clarify')); // poll /health while Clarify is on screen
     if (C().status === 'idle' && ST.hasDocs(S().docs) && !U.busy && !X.ui.busy) setTimeout(begin, 0); // arriving starts the conversation
-    if (!dryRun() && VO() && VO().ready()) {
-      U.voiceConvo = true; U.convoRetries = 0;
-      const c = C();
-      if (c.status === 'open' || c.status === 'done') setTimeout(convoMaybeSpeak, 0);
-    } else if (C().status === 'open' || C().status === 'done') {
-      setTimeout(focusComposer, 0);
-    }
+    // Product rule (Oct 12 2026): the AI is text-only — arriving never starts voice
+    // conversation mode and replies are never read aloud. The user types or uses the mic.
+    if (C().status === 'open' || C().status === 'done') setTimeout(focusComposer, 0);
   };
   const reset = () => { Object.assign(U, { busy: false, err: '', lastText: '', lastSilent: false, lastVoice: false, lastHeard: '', liveHeard: '', voiceConvo: false, convoSpeaking: false, listening: false, convoRetries: 0, anim: null, animAll: false, bump: null, edit: null, editVal: '', staleOk: false, reviewing: false, readT0: 0, x: {}, fromVoice: false, vnote: '' }); clearTimeout(U.convoSpeakT); U.convoSpeakT = null; clearInterval(U.capTimer); U.capTimer = null; if (VO()) VO().reset(); };
   const init = (ctx) => { X = ctx; if (VO()) VO().onChange(voiceChanged); };

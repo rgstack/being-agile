@@ -146,14 +146,12 @@ test('Clarify dry-run: mic inserts scripted text with a note, no sidecar call; v
   const html = CL.render();
   assert.match(html, /class="cl-vdot"/);
   assert.match(html, /data-a="cl-mic"/);
-  assert.match(html, /data-a="cl-speak" data-k="s1"/);
+  assert.doesNotMatch(html, /data-a="cl-speak"/); // AI is text-only (product rule, Oct 12 2026): replies get no speaker button
   assert.match(html, /local voice · \$0\.00/);
   assert.doesNotMatch(html, /data-a="cl-mic"[^>]* disabled/); // dry-run keeps the mic live without a sidecar
   CL.actions['cl-mic']();
   assert.equal(S.clarify.composer, '12 sprints');
   assert.match(CL.render(), /Voice unavailable in dry-run/);
-  CL.actions['cl-speak']({ dataset: { k: 's1' } });
-  assert.match(toasts.pop(), /dry-run/);
   assert.equal(calls.filter((c) => c.url.indexOf('/stt') !== -1 || c.url.indexOf('/tts') !== -1).length, 0);
   // Live mode with the sidecar down: the mic press is a hint, never an error in the conversation.
   w.OpenAI.configure({ dryRun: false });
