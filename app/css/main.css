@@ -373,10 +373,6 @@ button.chip[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); 
 .cl-composer .ai-hint, .cl-composer .cl-dry { margin: 8px 2px 0; }
 
 /* voice (optional local sidecar): header dot, mic in the composer, speaker on each reply */
-.cl-vdot { display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: .02em; font-weight: 500; }
-.cl-vdot i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); opacity: .55; }
-.cl-vdot[data-ok="1"] i { background: var(--ok); opacity: 1; box-shadow: 0 0 0 3px var(--ok-wash); }
-.cl-vdot[data-ok="1"] { color: var(--ok-ink); }
 .cl-mic { flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line-2); color: var(--ink-2); background: var(--paper); transition: border-color .15s, background-color .15s, color .15s; }
 .cl-mic .ic { width: 16px; height: 16px; }
 .cl-mic:hover { border-color: var(--ink); color: var(--ink); background: var(--wash); }
@@ -388,11 +384,6 @@ button.chip[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); 
 .cl-vstate i { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }
 .cl-vstate.rec i { background: var(--bad); animation: think 1.05s var(--ease) infinite; }
 .cl-vnote { margin: 8px 2px 0; font-size: 13px; color: var(--ink-2); }
-.cl-speak { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-left: 6px; border-radius: 6px; color: var(--ink-3); vertical-align: -5px; transition: color .15s, background-color .15s; }
-.cl-speak .ic { width: 14px; height: 14px; }
-.cl-speak:hover { color: var(--ink); background: var(--wash); }
-.cl-speak:disabled { opacity: .45; cursor: default; }
-.cl-speak.on { color: var(--ok-ink); background: var(--ok-wash); }
 
 /* the ledger */
 .cl-kicker { font: 600 11.5px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); padding-bottom: 12px; border-bottom: 1.5px solid var(--ink); }
@@ -456,7 +447,7 @@ button.chip[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); 
   .cl-composer { padding-bottom: 6px; }
 }
 @media print {
-  .cl-composer, .cl-cta, .cl-chips, .cl-skip, .lens-acts, .cl-think, .cl-err, .cl-speak, .cl-vdot { display: none !important; }
+  .cl-composer, .cl-cta, .cl-chips, .cl-skip, .lens-acts, .cl-think, .cl-err { display: none !important; }
   .clarify { display: block; }
   .clarify > .ledger { position: static; border: 1px solid var(--line-2); padding: 12px 16px 4px; margin: 0 0 24px; break-inside: avoid-page; }
   .turn.ask.cur .cl-qt { font-size: 22px; }

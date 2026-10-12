@@ -50,11 +50,11 @@
       if (q) parts.push('Q' + qNum(c, q) + ' of ~' + total);
       else if (total) parts.push(open ? X.plural(open, 'question') + ' open' : 'nothing more to ask');
     }
-    return '<p class="cl-head">' + parts.map(esc).join(' <span aria-hidden="true">·</span> ') + (VO() ? ' <span aria-hidden="true">·</span> ' + VO().dot() : '') + '</p>';
+    return '<p class="cl-head">' + parts.map(esc).join(' <span aria-hidden="true">·</span> ') + '</p>';
   }
   const staleNote = (c) => (stale(c) && !U.staleOk ? '<p class="cl-stale" role="status">Documents changed since this review. <button class="link" data-a="cl-rereview">Re-review</button> <span aria-hidden="true">·</span> <button class="link" data-a="cl-keep">Keep going</button></p>' : '');
-  // A turn that began as speech shows the local voice price (nothing) in place of the API estimate; the usage meter still records the call.
-  const costLine = (cost) => (cost ? '<span class="cl-cost">' + (cost.voice ? 'local voice · $0.00' : cost.dry ? 'dry-run' : '~' + X.fmtUsd(cost.usd || 0) + ' · ' + ((cost.pt || 0) + (cost.ct || 0)).toLocaleString() + ' tokens') + '</span>' : '');
+  // A turn that began as speech shows the mic price (~nothing: Whisper is a fraction of a cent, metered separately) in place of the API estimate; the usage meter still records the call.
+  const costLine = (cost) => (cost ? '<span class="cl-cost">' + (cost.voice ? 'mic · ~$0.00' : cost.dry ? 'dry-run' : '~' + X.fmtUsd(cost.usd || 0) + ' · ' + ((cost.pt || 0) + (cost.ct || 0)).toLocaleString() + ' tokens') + '</span>' : '');
 
   function renderTop(c) {
     if (reading(c)) {
@@ -87,8 +87,7 @@
       return '<li class="turn ask settled' + anim + '" id="' + t.id + '"><span class="cl-n" aria-hidden="true">' + n + '</span><div class="cl-q"><p class="cl-qt"><span class="vh">Question ' + n + ': </span>' + esc(q.text) + '</p>' + st + '</div></li>';
     }
     if (t.kind === 'you') return '<li class="turn you' + anim + '" id="' + t.id + '"><span class="cl-n" aria-hidden="true"></span><div class="cl-you"><span class="cl-who">You</span><p>' + esc(t.text) + '</p></div></li>';
-    const spk = VO() && t.text ? ' ' + VO().speaker(t.id, { dry: AI.getConfig().dryRun }) : '';
-    return '<li class="turn say' + anim + '" id="' + t.id + '"><span class="cl-n" aria-hidden="true"></span><div class="cl-say"><p><span class="vh">Analyst: </span>' + X.mi(t.text) + '</p>' + spk + costLine(t.cost) + '</div></li>';
+    return '<li class="turn say' + anim + '" id="' + t.id + '"><span class="cl-n" aria-hidden="true"></span><div class="cl-say"><p><span class="vh">Analyst: </span>' + X.mi(t.text) + '</p>' + costLine(t.cost) + '</div></li>';
   }
   function composer(c) {
     const q = cur(c), dry = AI.getConfig().dryRun, live = !dry;
@@ -336,31 +335,24 @@
       dropText(c, scriptedSpeech(c)); U.vnote = 'Voice unavailable in dry-run: scripted text inserted. Edit it, then send.';
       save(); X.render(); focusComposer(); return;
     }
-    if (!V.ready()) { X.toast(V.HINT); V.health(); return; }
+    if (!V.supported()) { X.toast('This browser cannot record audio here. Type your reply instead.'); return; }
+    if (!AI.getConfig().hasKey) { X.toast('Add your OpenAI API key in Settings (gear icon) to use the mic.'); return; }
     V.toggle((text, err) => {
       if (err) X.toast(err);
       else if (text) { dropText(c, text); U.vnote = ''; save(); }
       X.render(); if (!err) focusComposer();
     });
   }
-  function speakPressed(id) {
-    const c = C(), V = VO(), t = c.turns.find((x) => x.id === id);
-    if (!V || !t) return;
-    if (dryRun()) { X.toast('Voice unavailable in dry-run: the reply would be read aloud here.'); return; }
-    if (!V.ready()) { X.toast(V.HINT); V.health(); return; }
-    V.speak(t.text, id, (err) => { if (err) X.toast(err); });
-  }
-  // Health flips patch the dot and buttons in place (no re-render, so typing is never disturbed); capture/playback states re-render.
+  // Mic-button and status line patch in place (no re-render, so typing is never disturbed).
   function syncVoiceDom() {
     const V = VO(); if (!V || !document.querySelector('.clarify')) return;
-    const dry = dryRun();
-    const d = document.querySelector('.cl-vdot'); if (d) d.outerHTML = V.dot();
-    const m = document.querySelector('.cl-mic'); if (m) m.outerHTML = V.mic({ disabled: U.busy, dry });
-    document.querySelectorAll('.cl-speak').forEach((b) => { b.outerHTML = V.speaker(b.dataset.k, { dry }); });
+    const m = document.querySelector('.cl-mic'); if (m) m.outerHTML = V.mic({ disabled: U.busy, dry: dryRun() });
+    const s = document.querySelector('.cl-vstate'), ns = V.micState();
+    if (s) { if (ns) s.outerHTML = ns; else s.remove(); }
+    else if (ns) { const box = document.querySelector('.cl-box'); if (box) box.insertAdjacentHTML('afterend', ns); }
   }
-  function voiceChanged(what) {
-    if (!document.querySelector('.clarify')) return;
-    if (what === 'health') syncVoiceDom(); else X.render();
+  function voiceChanged() {
+    if (document.querySelector('.clarify')) syncVoiceDom();
   }
 
   // ---------- handlers (merged into screens.js maps; names prefixed cl-) ----------
@@ -368,7 +360,6 @@
     'cl-begin': begin,
     'cl-send': () => { const c = C(), t = c.composer.trim(); if (!t) { focusComposer(); return; } turn(t, { voice: U.fromVoice }); },
     'cl-mic': micPressed,
-    'cl-speak': (el) => speakPressed(el.dataset.k),
     'cl-chip': (el) => turn(el.dataset.k),
     'cl-other': () => focusComposer(),
     'cl-skip': skip,
@@ -407,7 +398,6 @@
   const changes = {};
   const onEnter = () => {
     if (C().status === 'open' || C().status === 'done') setTimeout(focusComposer, 0);
-    if (VO()) VO().watch(true, () => !!document.querySelector('.clarify')); // poll /health while Clarify is on screen
   };
   const reset = () => { Object.assign(U, { busy: false, err: '', lastText: '', lastSilent: false, lastVoice: false, anim: null, animAll: false, bump: null, edit: null, editVal: '', staleOk: false, reviewing: false, readT0: 0, x: {}, fromVoice: false, vnote: '' }); clearInterval(U.capTimer); U.capTimer = null; if (VO()) VO().reset(); };
   const init = (ctx) => { X = ctx; if (VO()) VO().onChange(voiceChanged); };

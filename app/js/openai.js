@@ -301,6 +301,44 @@
     return text;
   }
 
+  // Whisper transcription for the Clarify mic: a recorded utterance (webm) -> text.
+  // Metered like any other call (whisper-1 is $0.006/min; a 10s answer is ~$0.001).
+  // The endpoint is derived from the configured chat-completions URL, so a corporate
+  // proxy keeps working as long as it also serves /audio/transcriptions.
+  async function transcribe(blob, seconds) {
+    if (cfg.dryRun) throw new Error('Voice transcription needs live mode — dry-run has no microphone path.');
+    if (!effKey() && cfg.endpoint === DEFAULT_ENDPOINT) throw new Error('No API key. Enter your OpenAI API key in Settings (gear icon), then press the mic again.');
+    const url = cfg.endpoint.replace(/\/chat\/completions\/?$/, '') + '/audio/transcriptions';
+    const fd = new FormData();
+    try { fd.append('file', blob, 'mic.webm'); } catch (e) { throw new Error('Could not package the recording.'); }
+    fd.append('model', 'whisper-1');
+    const headers = {};
+    const k = effKey(); if (k) headers.Authorization = 'Bearer ' + k; // custom proxy without a key injects auth itself
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 120000);
+    let res;
+    try { res = await fetch(url, { method: 'POST', headers, body: fd, signal: ctl.signal }); }
+    catch (e) {
+      if (e && e.name === 'AbortError') throw new Error('Transcription timed out after 120s.');
+      throw new Error('Network error: ' + ((e && e.message) || e));
+    } finally { clearTimeout(timer); }
+    if (!res.ok) {
+      let detail = '';
+      try { const j = await res.json(); detail = (j && j.error && j.error.message) || ''; } catch (e) { /* no JSON body */ }
+      if (res.status === 401) throw new Error('401 Unauthorized — check your API key in Settings.');
+      if (res.status === 403) throw new Error('403 Forbidden — ' + (detail || 'your key may lack access to Whisper.'));
+      if (res.status === 429) throw new Error('429 Rate limited — wait a moment and retry.');
+      throw new Error('Transcription failed (' + res.status + '): ' + (detail || res.statusText || 'unknown'));
+    }
+    let text = '';
+    try { const j = await res.json(); text = ((j && j.text) || '').trim(); } catch (e) { throw new Error('Transcription returned an unreadable response.'); }
+    const secs = Math.max(1, Math.round(seconds || 5));
+    const rec = { operation: 'whisper', model: 'whisper-1', prompt_tokens: 0, completion_tokens: 0, est_usd: 0.006 * secs / 60, at: Date.now(), dry_run: false };
+    calls.push(rec);
+    listeners.forEach((f) => f(getUsage()));
+    return text;
+  }
+
   function getUsage() {
     const total = calls.reduce((t, c) => ({
       prompt_tokens: t.prompt_tokens + c.prompt_tokens,
@@ -312,5 +350,5 @@
   const loadUsage = (saved) => { calls.length = 0; (saved || []).forEach((c) => calls.push(c)); };
   const onUsage = (f) => listeners.push(f);
 
-  window.OpenAI = { DEFAULT_ENDPOINT, PRICING, MODELS, BUDGETS, PROMPTS, BudgetError, configure, getConfig, estimateCall, generateStories, generateTestPlan, generateTestCases, clarifyReview, clarifyTurn, assist, getUsage, loadUsage, onUsage };
+  window.OpenAI = { DEFAULT_ENDPOINT, PRICING, MODELS, BUDGETS, PROMPTS, BudgetError, configure, getConfig, estimateCall, generateStories, generateTestPlan, generateTestCases, clarifyReview, clarifyTurn, assist, transcribe, getUsage, loadUsage, onUsage };
 })();
