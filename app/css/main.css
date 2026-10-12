@@ -456,7 +456,7 @@ button.chip[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); 
   .cl-composer { padding-bottom: 6px; }
 }
 @media print {
-  .cl-composer, .cl-cta, .cl-chips, .cl-skip, .lens-acts, .cl-think, .cl-err, .cl-speak, .cl-vdot { display: none !important; }
+  .cl-composer, .cl-cta, .cl-chips, .cl-skip, .lens-acts, .cl-think, .cl-err, .cl-speak, .cl-vdot, .cl-textmode, .cl-heard { display: none !important; }
   .clarify { display: block; }
   .clarify > .ledger { position: static; border: 1px solid var(--line-2); padding: 12px 16px 4px; margin: 0 0 24px; break-inside: avoid-page; }
   .turn.ask.cur .cl-qt { font-size: 22px; }
@@ -1239,3 +1239,14 @@ input[type="checkbox"] { accent-color: var(--ink); width: 15px; height: 15px; ma
 .cov-map .mm { max-height: 360px; overflow: auto; }
 /* Build version stamp, bottom-left (auto-set from the screens.js ?v= cache-buster) */
 .appver { align-self: flex-start; margin-top: 12px; font-size: 10px; font-weight: 600; letter-spacing: .04em; color: var(--ink-2); background: var(--wash); border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; opacity: .92; }
+
+/* Heard-you-say transcript preview: shows transcribed speech under the composer */
+.cl-heard { display: flex; align-items: flex-start; gap: 8px; margin: 8px 2px 0; padding: 10px 12px; background: var(--wash); border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+.cl-heard-label { flex-shrink: 0; font-weight: 600; color: var(--ink-2); }
+.cl-heard-text { color: var(--ink); }
+/* Live interim transcript: faded/italic while still updating */
+.cl-heard.live { opacity: 0.75; }
+.cl-heard.live .cl-heard-text { font-style: italic; }
+/* Text-mode opt-out button, next to the voice dot in the Clarify header (shown only when voice convo is active) */
+.cl-textmode { font: inherit; font-size: 12px; font-weight: 600; color: var(--ink-2); background: var(--wash); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; cursor: pointer; }
+.cl-textmode:hover { border-color: var(--ink-3); }

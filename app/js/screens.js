@@ -921,6 +921,9 @@
   modelEl.onchange = () => { S.model = modelEl.value; AI.configure({ model: S.model }); ST.save(); render(); };
   const KEYSTORE = 'being-agile-api-key'; // localStorage, per Rajan's call Oct 6 2026: his key, his risk; clear via field or Reset demo
   const store = (fn) => { try { return fn(localStorage); } catch (e) { return null; } };
+  const voiceEl = $('set-voice');
+  voiceEl.value = store((s) => s.getItem('ba_voice')) || 'lessac';
+  voiceEl.onchange = () => { store((s) => s.setItem('ba_voice', voiceEl.value)); };
   const syncKey = () => { const v = keyEl.value.trim(); AI.configure({ apiKey: v }); store((s) => (v ? s.setItem(KEYSTORE, v) : s.removeItem(KEYSTORE))); };
   keyEl.addEventListener('input', syncKey);
   keyEl.addEventListener('change', syncKey); // change fires for autofill/password-manager fills that skip input events

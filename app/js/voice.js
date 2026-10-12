@@ -10,13 +10,14 @@
   const POLL_MS = 15000, HEALTH_TIMEOUT_MS = 1500, MAX_REC_MS = 90000, RATE = 16000;
   // ok: last health result; checked: at least one health call finished; info: /health body; state: idle|rec|stt|tts;
   // speaking: id of the message being read aloud; stream/rec/chunks: the live capture; audio: the playing element.
-  const V = { ok: false, checked: false, info: null, state: 'idle', speaking: null, stream: null, rec: null, chunks: [], audio: null, timer: null, recTimer: null, listeners: [] };
+  const V = { ok: false, checked: false, info: null, state: 'idle', speaking: null, stream: null, rec: null, chunks: [], audio: null, timer: null, recTimer: null, partialTimer: null, partialBusy: false, partialText: '', gen: 0, autoStop: false, silTimer: null, silAC: null, recT0: 0, ttsEndCb: null, listeners: [] };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const emit = (what) => V.listeners.forEach((f) => { try { f(what, snapshot()); } catch (e) { /* a listener must never break capture */ } });
-  const snapshot = () => ({ ok: V.ok, checked: V.checked, state: V.state, speaking: V.speaking, info: V.info });
+  const snapshot = () => ({ ok: V.ok, checked: V.checked, state: V.state, speaking: V.speaking, info: V.info, partialText: V.partialText });
   const setState = (s) => { if (V.state !== s) { V.state = s; emit('state'); } };
   const withTimeout = (ms) => (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined);
   const HINT = 'Start the voice sidecar: python3 sidecar/voice_server.py';
+  const getVoice = () => { try { return localStorage.getItem('ba_voice') || 'lessac'; } catch (e) { return 'lessac'; } };
 
   // ---------- health ----------
   async function health() {
@@ -80,12 +81,62 @@
   }
   function release() {
     if (V.stream) { try { V.stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ } }
-    clearTimeout(V.recTimer); V.recTimer = null; V.stream = null; V.rec = null; V.chunks = [];
+    clearTimeout(V.recTimer); V.recTimer = null; clearInterval(V.partialTimer); V.partialTimer = null; V.partialBusy = false; V.partialText = ''; stopSilenceWatch(); V.stream = null; V.rec = null; V.chunks = [];
+  }
+  // Live interim transcript: every PARTIAL_MS while recording, transcribe audio-so-far and emit('partial').
+  // Fully local (same /stt endpoint); skipped while a partial is in flight so requests never pile up.
+  const PARTIAL_MS = 1500;
+  async function partial() {
+    if (V.state !== 'rec' || V.partialBusy || !V.chunks.length) return;
+    const g = V.gen; // per-recording token: a late partial must never leak into the next session
+    V.partialBusy = true;
+    try {
+      const blob = new Blob(V.chunks.slice(), { type: (V.rec && V.rec.mimeType) || 'audio/webm' });
+      if (blob.size < 500) return; // too little audio to bother
+      const wav = await toWav(blob);
+      if (g !== V.gen || V.state !== 'rec') return;
+      const text = await stt(wav);
+      if (g !== V.gen || V.state !== 'rec') return; // user stopped (or restarted) while we were transcribing
+      if (text && text !== V.partialText) { V.partialText = text; emit('partial'); }
+    } catch (e) { /* interim is best-effort; the final transcription still runs on stop */ }
+    finally { V.partialBusy = false; }
+  }
+  // ---------- silence auto-stop (conversation mode only) ----------
+  // Watches mic input level via AnalyserNode; after SILENCE_MS of quiet (past an initial
+  // grace period so the user gets a moment to start talking), stops the recording.
+  const SILENCE_MS = 2000, SILENCE_GRACE_MS = 3000;
+  function startSilenceWatch(stream) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try {
+      const ac = new AC(), src = ac.createMediaStreamSource(stream), an = ac.createAnalyser();
+      an.fftSize = 2048; src.connect(an);
+      const buf = new Uint8Array(an.fftSize);
+      let quietSince = 0;
+      V.silTimer = setInterval(() => {
+        if (V.state !== 'rec') { stopSilenceWatch(); return; }
+        an.getByteTimeDomainData(buf);
+        let peak = 0;
+        for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i] - 128); if (v > peak) peak = v; }
+        const now = Date.now();
+        if (now - V.recT0 < SILENCE_GRACE_MS) { quietSince = 0; return; } // grace period
+        if (peak < 8) { // very quiet (~-42 dBFS on 8-bit samples)
+          if (!quietSince) quietSince = now;
+          else if (now - quietSince >= SILENCE_MS) { stopSilenceWatch(); stop(); }
+        } else quietSince = 0;
+      }, 200);
+      V.silAC = ac;
+    } catch (e) { /* silence detection unavailable; manual stop still works */ }
+  }
+  function stopSilenceWatch() {
+    clearInterval(V.silTimer); V.silTimer = null;
+    try { if (V.silAC) V.silAC.close(); } catch (e) { /* ignore */ }
+    V.silAC = null;
   }
   // Toggle capture. First press starts, second press stops and transcribes; cb(text, err) fires once per stop.
   // Returns a promise that resolves to true when a recording started, false otherwise (the error already reported through cb).
-  async function toggle(cb) {
-    cb = cb || function () {};
+  async function toggle(cb, opts) {
+    cb = cb || function () {}; opts = opts || {};
     if (V.state === 'rec') { stop(); return false; }
     if (V.state !== 'idle') return false;
     if (!V.ok) { cb(null, HINT); return false; }
@@ -94,7 +145,7 @@
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { cb(null, e && e.name === 'NotAllowedError' ? 'Microphone access was denied. Allow the mic for this page and try again.' : 'No microphone available: ' + ((e && e.message) || e)); return false; }
     let rec;
     try { rec = new MediaRecorder(stream); } catch (e) { try { stream.getTracks().forEach((t) => t.stop()); } catch (e2) { /* ignore */ } cb(null, 'Recording is not supported in this browser.'); return false; }
-    V.stream = stream; V.rec = rec; V.chunks = [];
+    V.stream = stream; V.rec = rec; V.chunks = []; V.gen++; V.autoStop = !!opts.autoStop;
     rec.ondataavailable = (e) => { if (e.data && e.data.size) V.chunks.push(e.data); };
     rec.onerror = () => { release(); setState('idle'); cb(null, 'Recording failed.'); };
     rec.onstop = async () => {
@@ -107,34 +158,43 @@
         cb(text || '', text ? null : 'I did not catch any words. Try again.');
       } catch (e) { setState('idle'); cb(null, (e && e.message) || String(e)); }
     };
-    rec.start();
+    rec.start(1000); // 1s timeslice: ondataavailable fires during recording so partials have audio
     V.recTimer = setTimeout(stop, MAX_REC_MS); // a forgotten mic stops itself
+    clearInterval(V.partialTimer); V.partialTimer = setInterval(partial, PARTIAL_MS);
+    V.recT0 = Date.now();
+    if (V.autoStop) startSilenceWatch(stream);
     setState('rec');
     return true;
   }
-  function stop() { if (V.rec && V.rec.state !== 'inactive') { try { V.rec.stop(); } catch (e) { release(); setState('idle'); } } }
+  function stop() { clearInterval(V.partialTimer); V.partialTimer = null; stopSilenceWatch(); if (V.rec && V.rec.state !== 'inactive') { try { V.rec.stop(); } catch (e) { release(); setState('idle'); } } }
 
   // ---------- text to speech ----------
   function stopAudio() {
+    V.ttsEndCb = null; // a manual stop is not a natural end; conversation mode must not auto-listen
     if (V.audio) { try { V.audio.pause(); } catch (e) { /* ignore */ } if (V.audio.src) { try { URL.revokeObjectURL(V.audio.src); } catch (e) { /* ignore */ } } V.audio = null; }
     if (V.speaking !== null || V.state === 'tts') { V.speaking = null; if (V.state === 'tts') V.state = 'idle'; emit('state'); }
   }
   // Read `text` aloud; `id` tags the message so the UI can show which one is playing. Pressing the same one again stops it.
-  async function speak(text, id, cb) {
+  // cb(err) fires when playback starts (or fails to start); onEnded(ok) fires when playback naturally
+  // ends (ok=true) or errors mid-play (ok=false). A manual stopAudio() never fires onEnded.
+  async function speak(text, id, cb, onEnded) {
     cb = cb || function () {};
     if (V.speaking === id) { stopAudio(); return false; }
     stopAudio();
     if (!V.ok) { cb(HINT); return false; }
     V.speaking = id; V.state = 'tts'; emit('state');
     try {
-      const r = await fetch(BASE + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: String(text || '') }) });
+      const r = await fetch(BASE + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: String(text || ''), voice: getVoice() }) });
       if (!r.ok) { let j = null; try { j = await r.json(); } catch (e) { j = null; } throw new Error((j && j.error) || ('Sidecar replied ' + r.status)); }
       const blob = await r.blob();
       if (V.speaking !== id) return false; // stopped while fetching
       if (typeof Audio === 'undefined') throw new Error('Audio playback is not available here.');
       const a = new Audio(URL.createObjectURL(blob));
       V.audio = a;
-      a.onended = a.onerror = () => { if (V.audio === a) stopAudio(); };
+      V.ttsEndCb = (typeof onEnded === 'function') ? onEnded : null;
+      const done = (ok) => { if (V.audio === a) { const f = V.ttsEndCb; stopAudio(); if (f) { try { f(ok); } catch (e) { /* listener must never break playback */ } } } };
+      a.onended = () => done(true);
+      a.onerror = () => done(false);
       await a.play();
       cb(null);
       return true;
@@ -169,5 +229,5 @@
   const onChange = (f) => { V.listeners.push(f); };
   const reset = () => { stop(); release(); stopAudio(); setState('idle'); };
 
-  window.Voice = { BASE, HINT, health, watch, ready, canRecord, toggle, stop, speak, stopAudio, encodeWav, dot, mic, micState, speaker, onChange, reset, state: snapshot };
+  window.Voice = { BASE, HINT, health, watch, ready, canRecord, toggle, stop, speak, stopAudio, encodeWav, dot, mic, micState, speaker, onChange, reset, state: snapshot, get voice() { return getVoice(); } };
 })();

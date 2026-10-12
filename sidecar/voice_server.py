@@ -4,9 +4,9 @@
 Runs on 127.0.0.1:8099 only. The browser app POSTs audio here and gets text back, or POSTs text
 and gets WAV back; nothing leaves the machine. The LLM turn itself never passes through here.
 
-  GET  /health            -> {"ok": true, "stt": "faster-whisper-base", "tts": "piper-lessac-medium"}
-  POST /stt  (audio body) -> {"text": "..."}      WAV preferred; anything PyAV decodes is accepted
-  POST /tts  {"text":...} -> audio/wav bytes
+  GET  /health                        -> {"ok": true, "stt": "faster-whisper-base", "tts": "piper", "voices": ["lessac", ...]}
+  POST /stt  (audio body)             -> {"text": "..."}      WAV preferred; anything PyAV decodes is accepted
+  POST /tts  {"text":..., "voice":..} -> audio/wav bytes      voice defaults to "lessac"
 
 Models are read from sidecar/models/ (run download_models.py once). Missing models or packages
 give a clear JSON error instead of a crash, so the app can keep working in text mode.
@@ -22,13 +22,18 @@ HOST, PORT = "127.0.0.1", int(os.environ.get("VOICE_PORT", "8099"))
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODELS = os.path.join(HERE, "models")
 STT_DIR = os.path.join(MODELS, "faster-whisper-base")
-TTS_ONNX = os.path.join(MODELS, "en_US-lessac-medium.onnx")
+TTS_VOICES = {
+    "lessac":  "en_US-lessac-medium",
+    "amy":     "en_US-amy-medium",
+    "kristin": "en_US-kristin-medium",
+    "ryan":    "en_US-ryan-medium",
+}
 LANG = os.environ.get("VOICE_LANG", "en")
 HINT = "run: python3 sidecar/download_models.py"
 INSTALL = "run: python3 -m pip install -r sidecar/requirements.txt"
 
 STT = {"model": None, "err": None}
-TTS = {"voice": None, "err": None}
+TTS = {"cache": {}, "err": None, "available": []}  # cache: name -> PiperVoice; available: names with model files present
 
 
 def load_models():
@@ -44,14 +49,30 @@ def load_models():
         STT["err"] = "%s: %s" % (type(e).__name__, e)
     try:
         try:
-            from piper import PiperVoice
+            from piper import PiperVoice  # noqa: F401 — just verify import
         except ImportError:
             raise ImportError("piper-tts is not installed — " + INSTALL)
-        if not os.path.isfile(TTS_ONNX) or not os.path.isfile(TTS_ONNX + ".json"):
-            raise FileNotFoundError("TTS voice not found at " + TTS_ONNX + " — " + HINT)
-        TTS["voice"] = PiperVoice.load(TTS_ONNX)
+        for short, base in TTS_VOICES.items():
+            onnx = os.path.join(MODELS, base + ".onnx")
+            if os.path.isfile(onnx) and os.path.isfile(onnx + ".json"):
+                TTS["available"].append(short)
+        if not TTS["available"]:
+            raise FileNotFoundError("No TTS voice files found in " + MODELS + " — " + HINT)
     except Exception as e:
         TTS["err"] = "%s: %s" % (type(e).__name__, e)
+
+
+def get_voice(name):
+    """Return a loaded PiperVoice for `name`, lazy-loading and caching. Falls back to lessac or first available."""
+    from piper import PiperVoice
+    if name not in TTS["available"]:
+        name = "lessac" if "lessac" in TTS["available"] else TTS["available"][0]
+    if name in TTS["cache"]:
+        return TTS["cache"][name]
+    onnx = os.path.join(MODELS, TTS_VOICES[name] + ".onnx")
+    v = PiperVoice.load(onnx)
+    TTS["cache"][name] = v
+    return v
 
 
 def transcribe(audio_bytes):
@@ -59,9 +80,8 @@ def transcribe(audio_bytes):
     return " ".join(s.text.strip() for s in segments).strip()
 
 
-def synthesize(text):
+def synthesize(text, voice):
     buf = io.BytesIO()
-    voice = TTS["voice"]
     with wave.open(buf, "wb") as w:
         if hasattr(voice, "synthesize_wav"):   # piper-tts >= 1.3
             voice.synthesize_wav(text, w)
@@ -98,8 +118,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.split("?")[0] != "/health":
             return self._json(404, {"error": "not found"})
-        ok = STT["model"] is not None and TTS["voice"] is not None
-        out = {"ok": ok, "stt": "faster-whisper-base" if STT["model"] else None, "tts": "piper-lessac-medium" if TTS["voice"] else None}
+        ok = STT["model"] is not None and bool(TTS["available"])
+        out = {"ok": ok, "stt": "faster-whisper-base" if STT["model"] else None, "tts": "piper" if TTS["available"] else None, "voices": TTS["available"]}
         if not ok:
             out["error"] = "; ".join(e for e in (STT["err"], TTS["err"]) if e)
         self._json(200, out)
@@ -115,15 +135,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(400, {"error": "empty audio"})
                 return self._json(200, {"text": transcribe(audio)})
             if path == "/tts":
-                if TTS["voice"] is None:
+                if not TTS["available"]:
                     return self._json(503, {"error": "text-to-speech unavailable: " + (TTS["err"] or HINT)})
                 try:
-                    text = str(json.loads(self._body().decode("utf-8") or "{}").get("text") or "").strip()
+                    body = json.loads(self._body().decode("utf-8") or "{}")
                 except ValueError:
                     return self._json(400, {"error": "body must be JSON {\"text\": ...}"})
+                text = str(body.get("text") or "").strip()
+                voice_name = str(body.get("voice") or "lessac").strip()
                 if not text:
                     return self._json(400, {"error": "empty text"})
-                wav = synthesize(text[:4000])
+                wav = synthesize(text[:4000], get_voice(voice_name))
                 self.send_response(200)
                 self._cors()
                 self.send_header("Content-Type", "audio/wav")
@@ -142,8 +164,8 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     print("Loading models from", MODELS, "...", flush=True)
     load_models()
-    for name, st in (("STT", STT), ("TTS", TTS)):
-        print("  %s: %s" % (name, "ready" if st.get("model") or st.get("voice") else "UNAVAILABLE — " + st["err"]), flush=True)
+    print("  STT: %s" % ("ready" if STT["model"] else "UNAVAILABLE — " + STT["err"]), flush=True)
+    print("  TTS: %s" % ("voices available: " + ", ".join(TTS["available"]) if TTS["available"] else "UNAVAILABLE — " + TTS["err"]), flush=True)
     print("Voice sidecar on http://%s:%d  (Ctrl+C to stop)" % (HOST, PORT), flush=True)
     try:
         ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

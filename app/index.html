@@ -9,7 +9,7 @@
 <script>try{if(localStorage.getItem('being-agile-theme')==='dark')document.documentElement.dataset.theme='dark';}catch(e){}</script>
 <link rel="preload" as="font" type="font/woff2" crossorigin href="fonts/Fraunces[SOFT,WONK,opsz,wght].woff2">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="fonts/InstrumentSans[wdth,wght].woff2">
-<link rel="stylesheet" href="css/main.css?v=24">
+<link rel="stylesheet" href="css/main.css?v=25">
 </head>
 <body>
 <div class="app">
@@ -55,6 +55,14 @@
     <label class="fld">Model
       <select id="set-model" class="in"></select>
     </label>
+    <label class="fld">Voice
+      <select id="set-voice" class="in">
+        <option value="lessac">Lessac (default)</option>
+        <option value="amy">Amy</option>
+        <option value="kristin">Kristin</option>
+        <option value="ryan">Ryan</option>
+      </select>
+    </label>
     <label class="chk"><input id="set-dry" type="checkbox" checked> Dry-run (simulated responses, zero network calls)</label>
     <p class="hint">Dry-run: simulated responses, zero network calls. Uncheck to call OpenAI live with your key (metered).</p>
     <h3>Usage (estimates)</h3>
@@ -70,19 +78,19 @@
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="lock" class="lock" hidden></div>
 
-<script src="js/sample-data.js?v=24"></script>
-<script src="js/openai.js?v=24"></script>
-<script src="js/state.js?v=24"></script>
-<script src="js/csv.js?v=24"></script>
-<script src="js/pin.js?v=24"></script>
+<script src="js/sample-data.js?v=25"></script>
+<script src="js/openai.js?v=25"></script>
+<script src="js/state.js?v=25"></script>
+<script src="js/csv.js?v=25"></script>
+<script src="js/pin.js?v=25"></script>
 <script src="js/vendor/marked.js"></script>
 <script src="js/vendor/dompurify.js"></script>
 <!-- mermaid via CDN, deferred so a slow CDN never blocks app boot (markdown.js waits for it at diagram-paint time) -->
 <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-<script src="js/markdown.js?v=24"></script>
-<script src="js/rules.js?v=24"></script>
-<script src="js/voice.js?v=24"></script>
-<script src="js/clarify.js?v=24"></script>
-<script src="js/screens.js?v=24"></script>
+<script src="js/markdown.js?v=25"></script>
+<script src="js/rules.js?v=25"></script>
+<script src="js/voice.js?v=25"></script>
+<script src="js/clarify.js?v=25"></script>
+<script src="js/screens.js?v=25"></script>
 </body>
 </html>

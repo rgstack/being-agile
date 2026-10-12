@@ -161,3 +161,25 @@ test('Clarify dry-run: mic inserts scripted text with a note, no sidecar call; v
   assert.match(toasts.pop(), /sidecar/);
   assert.equal(S.clarify.composer, '12 sprints');
 });
+
+test('Clarify: arriving starts the review, and the analyst opens by playing back what it understood before the first question', async () => {
+  const { w } = boot(down, ['sample-data.js', 'openai.js', 'state.js', 'voice.js', 'clarify.js']);
+  const ST = w.State, CL = w.Clarify;
+  const S = ST.load();
+  S.docs.prd.text = 'A PRD with enough words to read.';
+  S.clarify = ST.clarifyFresh();
+  let done; const reviewed = new Promise((r) => { done = r; });
+  CL.init({ getS: () => S, ui: { busy: false }, render() {}, touch() {}, toast() {}, confirmBox: async () => true,
+    guarded: async (op, input, title, apply) => { const r = await w.OpenAI.clarifyReview(input); apply(r.data, r.usage); done(); return true; },
+    go() {}, genStories() {}, esc: (v) => String(v == null ? '' : v), mi: (v) => String(v), ic: () => '', fmtUsd: (n) => '$' + n.toFixed(2), plural: (n, o) => n + ' ' + o, errBox: () => '', apiHost: () => 'api.openai.com', openDoc() {}, openRules() {} });
+  w.OpenAI.configure({ dryRun: true });
+  CL.onEnter();
+  await reviewed; await new Promise((r) => setTimeout(r, 1700)); // begin() lets the reading animation finish
+  const [first, second] = S.clarify.turns;
+  assert.equal(first.kind, 'say');
+  assert.match(first.text, /^So, if I’ve got this right/);
+  assert.equal(second.kind, 'ask');
+  assert.equal(second.qid, 'Q1');
+  assert.doesNotMatch(CL.render(), /class="cl-brief/); // the play-back lives in the conversation, not above it
+  w.Voice.watch(false); w.close(); // onEnter started the /health poll
+});

@@ -17,7 +17,7 @@
   // View-only state, never persisted. anim: id of the one element that gets an entry animation on this render;
   // animAll: the brief + ledger rows rise together (review just arrived); bump: lens whose mark just changed.
   // fromVoice: the composer text began as speech (cleared when the box empties); vnote: a one-line voice notice under the composer.
-  const U = { busy: false, err: '', lastText: '', lastSilent: false, lastVoice: false, anim: null, animAll: false, bump: null, edit: null, editVal: '', staleOk: false, reviewing: false, readT0: 0, capTimer: null, x: {}, fromVoice: false, vnote: '' };
+  const U = { busy: false, err: '', lastText: '', lastSilent: false, lastVoice: false, anim: null, animAll: false, bump: null, edit: null, editVal: '', staleOk: false, reviewing: false, readT0: 0, capTimer: null, x: {}, fromVoice: false, vnote: '', voiceConvo: false, convoSpeaking: false, convoSpeakT: null, listening: false, convoRetries: 0 };
   const S = () => X.getS();
   const C = () => S().clarify;
   const esc = (v) => X.esc(v);
@@ -50,7 +50,8 @@
       if (q) parts.push('Q' + qNum(c, q) + ' of ~' + total);
       else if (total) parts.push(open ? X.plural(open, 'question') + ' open' : 'nothing more to ask');
     }
-    return '<p class="cl-head">' + parts.map(esc).join(' <span aria-hidden="true">·</span> ') + (VO() ? ' <span aria-hidden="true">·</span> ' + VO().dot() : '') + '</p>';
+    const convoTog = (VO() && !AI.getConfig().dryRun && U.voiceConvo) ? ' <span aria-hidden="true">·</span> <button type="button" class="cl-textmode" data-a="cl-textmode" title="Stop voice and return to typing">Text mode</button>' : '';
+    return '<p class="cl-head">' + parts.map(esc).join(' <span aria-hidden="true">·</span> ') + (VO() ? ' <span aria-hidden="true">·</span> ' + VO().dot() : '') + convoTog + '</p>';
   }
   const staleNote = (c) => (stale(c) && !U.staleOk ? '<p class="cl-stale" role="status">Documents changed since this review. <button class="link" data-a="cl-rereview">Re-review</button> <span aria-hidden="true">·</span> <button class="link" data-a="cl-keep">Keep going</button></p>' : '');
   // A turn that began as speech shows the local voice price (nothing) in place of the API estimate; the usage meter still records the call.
@@ -64,8 +65,9 @@
         '<p class="cl-cap"><span class="marks" aria-hidden="true"><i class="mark"></i><i class="mark"></i><i class="mark"></i></span><span class="cl-cap-t" data-names="' + esc(JSON.stringify(docs.map((d) => d.name))) + '">Reading the ' + esc(docs.length ? docs[0].name : 'documents') + '…</span></p></div>';
     }
     if (c.status === 'idle') {
-      return headLine(c) + '<p class="cl-brief cl-intro">Before stories are drafted, I’ll read every document through a delivery lens: timeline, stakeholders, value stream and business area. I’ll place what I can, ask you about what I can’t, and write the rest down as assumptions. Nothing I ask will block you.</p>' + X.errBox();
+      return headLine(c) + '<p class="cl-brief cl-intro">Give me a moment to read through what you’ve shared. I’ll tell you what I think you’re asking for, then we can talk through the few things I’m not sure about: timeline, who’s involved, the value stream and who builds it. Nothing I ask will hold you up.</p>' + X.errBox();
     }
+    if (c.brief && c.brief.opening) return headLine(c) + staleNote(c); // the analyst said it in the conversation instead
     return headLine(c) + staleNote(c) + '<p class="cl-brief' + (U.animAll ? ' anim' : '') + '">' + esc(c.brief ? c.brief.summary : '') + costLine(c.brief && c.brief.cost) + '</p>';
   }
   function chips(q) {
@@ -90,6 +92,14 @@
     const spk = VO() && t.text ? ' ' + VO().speaker(t.id, { dry: AI.getConfig().dryRun }) : '';
     return '<li class="turn say' + anim + '" id="' + t.id + '"><span class="cl-n" aria-hidden="true"></span><div class="cl-say"><p><span class="vh">Analyst: </span>' + X.mi(t.text) + '</p>' + spk + costLine(t.cost) + '</div></li>';
   }
+  // The "what I heard" box. Rendered as a placeholder the moment recording starts so that
+  // live partials can patch it in place without a full re-render (which would drop composer focus).
+  function heardHtml() {
+    const heard = U.lastHeard || U.liveHeard;
+    const live = !U.lastHeard && (!!U.liveHeard || U.listening);
+    const label = live ? (U.listening && !U.liveHeard ? 'Listening…' : 'Hearing you say:') : 'Heard you say:';
+    return '<div class="cl-heard' + (live ? ' live' : '') + '" role="status"><span class="cl-heard-label">' + esc(label) + '</span><span class="cl-heard-text">' + esc(heard || '…') + '</span></div>';
+  }
   function composer(c) {
     const q = cur(c), dry = AI.getConfig().dryRun, live = !dry;
     return '<div class="cl-composer"><div class="cl-box">' +
@@ -97,7 +107,7 @@
       '<textarea class="cl-input" data-i="cl-composer" rows="1" aria-label="Your reply" placeholder="' + (q ? 'Answer, or tell me something I missed…' : 'Tell me anything else the stories should know…') + '"' + (U.busy ? ' disabled' : '') + '>' + esc(c.composer) + '</textarea>' +
       (VO() ? VO().mic({ disabled: U.busy, dry }) : '') +
       '<button type="button" class="cl-send" data-a="cl-send"' + (U.busy ? ' disabled' : '') + '><span class="kbd" aria-hidden="true">⏎</span>Send</button></div>' +
-      (VO() ? VO().micState() : '') + (U.vnote ? '<p class="cl-vnote" role="status">' + esc(U.vnote) + '</p>' : '') +
+      (VO() ? VO().micState() : '') + ((U.lastHeard || U.liveHeard || U.listening) ? heardHtml() : '') + (U.vnote ? '<p class="cl-vnote" role="status">' + esc(U.vnote) + '</p>' : '') +
       (live ? '<p class="ai-hint">Don’t include sensitive information — this goes to ' + esc(X.apiHost()) + '. Each reply is one metered call.</p>' : '<p class="hint cl-dry">Dry-run: scripted replies, nothing is sent.</p>') + '</div>';
   }
   function renderBody(c) {
@@ -194,13 +204,17 @@
   }
   function applyReview(data, usage) {
     const s = S(), c = s.clarify, docs = docsInfo();
-    c.brief = { summary: data.brief || 'I read the documents.', words: docs.reduce((t, d) => t + d.words, 0), docs, cost: usage ? { pt: usage.prompt_tokens, ct: usage.completion_tokens, usd: usage.usd, dry: AI.getConfig().dryRun } : null };
+    const cost = usage ? { pt: usage.prompt_tokens, ct: usage.completion_tokens, usd: usage.usd, dry: AI.getConfig().dryRun } : null;
+    // The analyst opens by playing back what it understood, like a friend who just read everything; the questions follow.
+    const opening = data.opening || data.brief || '';
+    c.brief = { summary: data.brief || 'I read the documents.', opening, words: docs.reduce((t, d) => t + d.words, 0), docs, cost: opening ? null : cost };
     c.digest = data.digest || ''; c.ledger = data.ledger; c.questions = data.questions; c.turns = []; c.cursor = null; c.assumptions = [];
     c.docsHash = ST.docsHash(s.docs); c.status = 'open';
     U.staleOk = false; U.animAll = true; U.err = ''; U.edit = null;
+    if (opening) c.turns.push({ id: tid(), kind: 'say', text: opening, at: Date.now(), cost });
     const first = c.questions.find((q) => q.status === 'open');
     if (first) pose(c, first.id);
-    else c.turns.push({ id: tid(), kind: 'say', text: 'I could place everything from the documents. Confirm the rows you agree with, or tell me what I got wrong.', at: Date.now(), cost: null });
+    else c.turns.push({ id: tid(), kind: 'say', text: 'Honestly, the documents cover everything I’d normally ask about. Have a look at the ledger and confirm what looks right, or tell me where I’ve got it wrong.', at: Date.now(), cost: null });
   }
   async function begin() {
     const s = S(), c = s.clarify;
@@ -217,7 +231,7 @@
     } else if (c.status === 'reading') c.status = 'idle';
     U.reviewing = false; U.readT0 = 0;
     save(); X.render();
-    if (ok) focusComposer();
+    if (ok) { if (U.voiceConvo) convoMaybeSpeak(); else focusComposer(); }
   }
   const turnText = (c, t) => (t.kind === 'ask' ? ((c.questions.find((q) => q.id === t.qid) || {}).text || '') : t.text || '');
   const ctxFor = (c, text) => ({
@@ -257,7 +271,7 @@
     U.busy = true; U.err = ''; U.lastText = text; U.lastSilent = !!opts.silent; U.lastVoice = voice; U.edit = null; U.vnote = '';
     const cursor = c.cursor;
     let you = null;
-    if (!opts.silent) { you = { id: tid(), kind: 'you', text, qid: cursor, at: Date.now(), voice }; c.turns.push(you); c.composer = ''; U.fromVoice = false; U.anim = you.id; }
+    if (!opts.silent) { you = { id: tid(), kind: 'you', text, qid: cursor, at: Date.now(), voice }; c.turns.push(you); c.composer = ''; U.fromVoice = false; U.lastHeard = ''; U.liveHeard = ''; U.anim = you.id; }
     save(); X.render();
     try {
       const r = await AI.clarifyTurn(ctxFor(c, text));
@@ -268,7 +282,7 @@
       U.err = (e && e.message) || String(e);
     }
     U.busy = false; save(); X.render();
-    if (!U.err) focusComposer();
+    if (!U.err) { if (U.voiceConvo) convoMaybeSpeak(); else focusComposer(); }
   }
   // Skip is local: no AI call. The lens takes the analyst's default (assumed) if it offered one; the next listed question is posed.
   // Only when the list is exhausted is the analyst asked once, with "(skipped)", so it can add a follow-up or finish.
@@ -279,7 +293,7 @@
     const l = c.ledger[q.lens];
     if (l.status === 'open' && q.default) settleLens(c, q.lens, { status: 'assumed', value: ST.parseLens(q.lens, q.default, l.value), source: 'assumed' });
     const next = c.questions.find((x) => x.status === 'open');
-    if (next) { pose(c, next.id); save(); X.render(); focusComposer(); }
+    if (next) { pose(c, next.id); save(); X.render(); if (U.voiceConvo) convoMaybeSpeak(); else focusComposer(); }
     else { save(); turn('(skipped)', { silent: true }); }
   }
   // A human act on the ledger (Confirm / Edit) also settles any open question about that lens, without a round trip.
@@ -337,11 +351,17 @@
       save(); X.render(); focusComposer(); return;
     }
     if (!V.ready()) { X.toast(V.HINT); V.health(); return; }
-    V.toggle((text, err) => {
+    const wasRec = V.state().state === 'rec';
+    if (!wasRec) { U.lastHeard = ''; U.liveHeard = ''; } // bug fix: fresh heard box per recording
+    const p = V.toggle((text, err) => {
+      U.listening = false; U.liveHeard = ''; // bug fix: never leave stale interim text on screen
       if (err) X.toast(err);
-      else if (text) { dropText(c, text); U.vnote = ''; save(); }
+      else if (text) { dropText(c, text); U.lastHeard = text; U.vnote = ''; save(); }
       X.render(); if (!err) focusComposer();
     });
+    // Render the heard-box placeholder the moment recording starts, so live partials
+    // patch it in place instead of forcing a full re-render (which drops composer focus).
+    if (p && p.then) p.then((started) => { if (started) { U.listening = true; X.render(); } });
   }
   function speakPressed(id) {
     const c = C(), V = VO(), t = c.turns.find((x) => x.id === id);
@@ -358,9 +378,99 @@
     const m = document.querySelector('.cl-mic'); if (m) m.outerHTML = V.mic({ disabled: U.busy, dry });
     document.querySelectorAll('.cl-speak').forEach((b) => { b.outerHTML = V.speaker(b.dataset.k, { dry }); });
   }
-  function voiceChanged(what) {
+  function voiceChanged(what, snap) {
     if (!document.querySelector('.clarify')) return;
-    if (what === 'health') syncVoiceDom(); else X.render();
+    if (what === 'health') {
+      syncVoiceDom();
+      // auto-start when the sidecar first comes online (or recovers) while Clarify is open
+      if (snap.ok && !U.voiceConvo && !dryRun()) {
+        U.voiceConvo = true; U.convoRetries = 0;
+        convoMaybeSpeak();
+      }
+    } else if (what === 'partial') { U.liveHeard = (snap && snap.partialText) || ''; syncHeardDom(); }
+    else X.render();
+  }
+  function syncHeardDom() {
+    const box = document.querySelector('.cl-heard');
+    if (!box) return; // placeholder is rendered when recording starts; nothing to patch yet
+    box.outerHTML = heardHtml();
+  }
+
+  // ---------- voice conversation mode: ChatGPT-voice-style hands-free loop ----------
+  // Auto-starts on enter (or when the sidecar first comes online): the current question is
+  // read aloud → mic opens automatically → 2s of silence stops the recording → the answer
+  // is transcribed and sent → the next question is read aloud. Push-to-talk still works.
+  // The user can opt out via the "Text mode" button in the Clarify header.
+  function convoEnd(silent) {
+    U.voiceConvo = false; U.convoSpeaking = false; U.listening = false;
+    clearTimeout(U.convoSpeakT); U.convoSpeakT = null;
+    const c = C(), V = VO();
+    if (V) { V.stopAudio(); V.stop(); }
+    if (!silent) {
+      const lastSay = [...c.turns].reverse().find((x) => x.kind === 'say');
+      if (V && V.ready() && lastSay && !dryRun()) V.speak(lastSay.text, 'convo-done', () => {});
+      X.toast('Voice conversation ended.');
+    }
+    X.render();
+  }
+  // What the analyst said just before the current question (its opening, or its reply to your last answer).
+  function leadIn(c) {
+    const i = c.turns.map((t) => t.kind === 'ask' && t.qid === c.cursor).lastIndexOf(true), prev = i > 0 ? c.turns[i - 1] : null;
+    return prev && prev.kind === 'say' && prev.text ? prev.text.trim() + ' ' : '';
+  }
+  function convoMaybeSpeak() {
+    const c = C(), V = VO();
+    if (!U.voiceConvo || !V || dryRun()) return;
+    if (!document.querySelector('.clarify')) { U.voiceConvo = false; return; }
+    if (c.status !== 'open' && c.status !== 'done') return;
+    const q = cur(c);
+    const anyOpen = c.questions.some((x) => x.status === 'open');
+    if (!q || q.status !== 'open') { if (!anyOpen) convoEnd(); return; }
+    if (!V.ready()) { X.toast(V.HINT); V.health(); return; }
+    const txt = leadIn(c) + q.text + (q.why ? ' ' + q.why : '');
+    U.convoSpeaking = true;
+    clearTimeout(U.convoSpeakT); U.convoSpeakT = null;
+    // Watchdog: if the natural end-of-playback callback never fires (e.g. the user pressed
+    // another speaker button mid-question), don't leave the loop stuck waiting.
+    U.convoSpeakT = setTimeout(() => { if (U.convoSpeaking) { U.convoSpeaking = false; if (U.voiceConvo) convoListen(); } }, Math.max(15000, txt.length * 120 + 15000));
+    V.speak(txt, 'convo-' + q.id, (err) => {
+      // cb fires when playback starts (err==null) or fails to start (err set).
+      if (err) { clearTimeout(U.convoSpeakT); U.convoSpeakT = null; U.convoSpeaking = false; if (U.voiceConvo) { X.toast(err); convoListen(); } }
+      // On success the onEnded hook below drives the next step.
+    }, (endedOk) => {
+      clearTimeout(U.convoSpeakT); U.convoSpeakT = null; U.convoSpeaking = false;
+      if (!U.voiceConvo) return;
+      if (!endedOk) X.toast('Could not play the question aloud.');
+      convoListen();
+    });
+    X.render();
+  }
+  function convoListen() {
+    const c = C(), V = VO();
+    if (!U.voiceConvo || !V || !V.ready() || dryRun()) return;
+    if (!document.querySelector('.clarify')) { U.voiceConvo = false; return; }
+    if (U.busy || X.ui.busy) return; // the analyst is thinking; turn() completion drives the next speak
+    if (V.state().state !== 'idle') return; // already recording or playing
+    U.lastHeard = ''; U.liveHeard = ''; U.convoRetries = U.convoRetries || 0;
+    const p = V.toggle(convoMicCb, { autoStop: true });
+    if (p && p.then) p.then((started) => { if (started && U.voiceConvo) { U.listening = true; X.render(); } });
+  }
+  function convoMicCb(text, err) {
+    U.listening = false; U.liveHeard = '';
+    if (!U.voiceConvo) { X.render(); return; } // mode turned off mid-recording
+    if (err || !text) {
+      U.convoRetries = (U.convoRetries || 0) + 1;
+      X.render();
+      const fatal = /denied|not available|not supported/i.test(err || '');
+      if (fatal || U.convoRetries > 2) { X.toast((err || 'I did not catch any words.') + ' Voice conversation off.'); convoEnd(true); return; }
+      X.toast(err || 'I did not catch any words. Listening again…');
+      convoListen(); // re-open the mic; the loop must not break on a hiccup
+      return;
+    }
+    U.convoRetries = 0;
+    U.lastHeard = text; // brief visible confirmation before the turn sends
+    save(); X.render();
+    turn(text, { voice: true }); // auto-send; turn() completion speaks the next question
   }
 
   // ---------- handlers (merged into screens.js maps; names prefixed cl-) ----------
@@ -368,6 +478,11 @@
     'cl-begin': begin,
     'cl-send': () => { const c = C(), t = c.composer.trim(); if (!t) { focusComposer(); return; } turn(t, { voice: U.fromVoice }); },
     'cl-mic': micPressed,
+    'cl-textmode': () => {
+      convoEnd(true);
+      X.toast('Text mode.');
+      setTimeout(focusComposer, 0);
+    },
     'cl-speak': (el) => speakPressed(el.dataset.k),
     'cl-chip': (el) => turn(el.dataset.k),
     'cl-other': () => focusComposer(),
@@ -401,15 +516,22 @@
   };
   let saveT;
   const inputs = {
-    'cl-composer': (el) => { C().composer = el.value; if (!el.value.trim()) U.fromVoice = false; grow(el); clearTimeout(saveT); saveT = setTimeout(save, 300); },
+    'cl-composer': (el) => { C().composer = el.value; if (!el.value.trim()) { U.fromVoice = false; U.lastHeard = ''; U.liveHeard = ''; } grow(el); clearTimeout(saveT); saveT = setTimeout(save, 300); },
     'cl-edit': (el) => { U.editVal = el.value; },
   };
   const changes = {};
   const onEnter = () => {
-    if (C().status === 'open' || C().status === 'done') setTimeout(focusComposer, 0);
     if (VO()) VO().watch(true, () => !!document.querySelector('.clarify')); // poll /health while Clarify is on screen
+    if (C().status === 'idle' && ST.hasDocs(S().docs) && !U.busy && !X.ui.busy) setTimeout(begin, 0); // arriving starts the conversation
+    if (!dryRun() && VO() && VO().ready()) {
+      U.voiceConvo = true; U.convoRetries = 0;
+      const c = C();
+      if (c.status === 'open' || c.status === 'done') setTimeout(convoMaybeSpeak, 0);
+    } else if (C().status === 'open' || C().status === 'done') {
+      setTimeout(focusComposer, 0);
+    }
   };
-  const reset = () => { Object.assign(U, { busy: false, err: '', lastText: '', lastSilent: false, lastVoice: false, anim: null, animAll: false, bump: null, edit: null, editVal: '', staleOk: false, reviewing: false, readT0: 0, x: {}, fromVoice: false, vnote: '' }); clearInterval(U.capTimer); U.capTimer = null; if (VO()) VO().reset(); };
+  const reset = () => { Object.assign(U, { busy: false, err: '', lastText: '', lastSilent: false, lastVoice: false, lastHeard: '', liveHeard: '', voiceConvo: false, convoSpeaking: false, listening: false, convoRetries: 0, anim: null, animAll: false, bump: null, edit: null, editVal: '', staleOk: false, reviewing: false, readT0: 0, x: {}, fromVoice: false, vnote: '' }); clearTimeout(U.convoSpeakT); U.convoSpeakT = null; clearInterval(U.capTimer); U.capTimer = null; if (VO()) VO().reset(); };
   const init = (ctx) => { X = ctx; if (VO()) VO().onChange(voiceChanged); };
 
   window.Clarify = { init, render, meta, onEnter, reset, actions, inputs, changes, dryTurn, scriptedSpeech };
