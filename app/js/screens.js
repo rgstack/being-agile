@@ -118,8 +118,8 @@
 
   // ---------- chrome: sidebar stages, proof tracker, top bar ----------
   const nav = $('steps');
-  nav.innerHTML = '<span class="pip" aria-hidden="true"></span>' + ST.STEPS.map((n, i) =>
-    '<button class="stage-link" data-step="' + i + '"><span class="n">' + (i + 1) + '</span><span class="l">' + n + '</span><span class="m"></span></button>').join('');
+  nav.innerHTML = ST.STEPS.map((n, i) =>
+    '<button class="stage-link" data-step="' + i + '"><span class="l">' + n + '</span><span class="m"></span></button>').join('');
   let reqKey = '';
   function buildReqUI(ids) {
     const key = ids.join(',');
@@ -154,7 +154,6 @@
     const d = S.docs, nDocs = [d.prd, d.design, d.api].concat(d.extras).filter((x) => x.text.trim()).length;
     const meta = [nDocs ? plural(nDocs, 'document') : 'No documents yet', CL.meta(), S.stories.length ? plural(S.stories.length, 'story', 'stories') : 'No stories yet', S.plan ? plural(planN, 'section') : 'No plan yet',
       nCases ? plural(nCases, 'case') : 'No cases yet', nCases ? (nCases - c['NOT RUN']) + ' of ' + nCases + ' run' : 'Nothing to run', tally.proven + ' of ' + model.length + ' proven'];
-    nav.style.setProperty('--i', S.step);
     nav.querySelectorAll('.stage-link').forEach((b, i) => {
       if (i === S.step) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
       const ok = ST.unlocked(i);
